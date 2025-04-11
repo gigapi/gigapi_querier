@@ -35,7 +35,8 @@ Content-Type: application/json
 Series can be used with or without time ranges, ie for calculating averages, etc.
 
 ```bash
-$ curl -X POST "http://localhost:9999/query?db=mydb"   -H "Content-Type: application/json"  \
+$ curl -X POST "http://localhost:9999/query?db=mydb" \
+  -H "Content-Type: application/json"  \
   -d '{"query": "SELECT count(*), avg(temperature) FROM weather"}'
 ```
 ```json
