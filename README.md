@@ -4,7 +4,7 @@
 
 GigAPI Go provides a SQL interface to query time-series using GigAPI Catalog Metadata and DuckDB
 
-## Quick Start
+## <img src="https://github.com/user-attachments/assets/a9aa3ebd-9164-476d-aedf-97b817078350" width=24 /> Quick Start
 
 ```bash
 # Build from source
@@ -19,7 +19,7 @@ PORT=8080 DATA_DIR=./data ./gigapi
 - `PORT`: Server port (default: 8080)
 - `DATA_DIR`: Path to data directory (default: ./data)
 
-## API Endpoints
+## <img src="https://github.com/user-attachments/assets/a9aa3ebd-9164-476d-aedf-97b817078350" width=24 /> API Endpoints
 
 ### Query Data
 
@@ -42,7 +42,7 @@ $ curl -X POST "http://localhost:9999/query?db=mydb"   -H "Content-Type: applica
 {"results":[{"avg(temperature)":87.025,"count_star()":"40"}]}
 ```
 
-## Data Structure
+## <img src="https://github.com/user-attachments/assets/a9aa3ebd-9164-476d-aedf-97b817078350" width=24 /> Data Structure
 
 ```
 /data
@@ -54,7 +54,7 @@ $ curl -X POST "http://localhost:9999/query?db=mydb"   -H "Content-Type: applica
           metadata.json
 ```
 
-## Query Processing Logic
+## <img src="https://github.com/user-attachments/assets/a9aa3ebd-9164-476d-aedf-97b817078350" width=24 /> Query Processing Logic
 
 1. Parse SQL query to extract measurement name and time range
 2. Find relevant parquet files using metadata
@@ -62,7 +62,7 @@ $ curl -X POST "http://localhost:9999/query?db=mydb"   -H "Content-Type: applica
 4. Post-process results to handle BigInt timestamps
 
 
-## Notes for Developers
+## <img src="https://github.com/user-attachments/assets/a9aa3ebd-9164-476d-aedf-97b817078350" width=24 /> Notes for Developers
 
 - File paths in metadata.json may contain absolute paths; the system handles both absolute and relative paths
 - Time fields are converted from nanosecond BigInt to ISO strings
