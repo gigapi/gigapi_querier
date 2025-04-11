@@ -11,7 +11,7 @@ GigAPI Go provides a SQL interface to query time-series using GigAPI Catalog Met
 go build -o gigapi *.go
 
 # Start the server
-PORT=8080 DATA=./data ./gigapi
+PORT=8080 DATA_DIR=./data ./gigapi
 ```
 
 ### Configuration
