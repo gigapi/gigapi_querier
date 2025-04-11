@@ -3,6 +3,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -23,7 +24,7 @@ func NewServer(dataDir string) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &Server{
 		QueryClient: client,
 	}, nil
@@ -52,19 +53,19 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	
+
 	// Parse request body
 	var req QueryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		sendErrorResponse(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-	
+
 	if req.Query == "" {
 		sendErrorResponse(w, "Missing query parameter", http.StatusBadRequest)
 		return
 	}
-	
+
 	// Extract database name from query param or body
 	dbName := r.URL.Query().Get("db")
 	if dbName == "" {
@@ -73,9 +74,9 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	if dbName == "" {
 		dbName = "mydb" // Default
 	}
-	
+
 	log.Printf("Executing query for database '%s': %s", dbName, req.Query)
-	
+
 	// Execute query
 	results, err := s.QueryClient.Query(req.Query, dbName)
 	if err != nil {
@@ -83,10 +84,10 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		sendErrorResponse(w, fmt.Sprintf("Query execution failed: %v", err), http.StatusInternalServerError)
 		return
 	}
-	
+
 	// Process results to handle special types for JSON
 	processedResults := processResultsForJSON(results)
-	
+
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(QueryResponse{
@@ -97,10 +98,10 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 // processResultsForJSON prepares results for JSON serialization
 func processResultsForJSON(results []map[string]interface{}) []map[string]interface{} {
 	processedResults := make([]map[string]interface{}, len(results))
-	
+
 	for i, row := range results {
 		processedRow := make(map[string]interface{})
-		
+
 		for key, value := range row {
 			// Handle different types of values
 			switch v := value.(type) {
@@ -116,10 +117,10 @@ func processResultsForJSON(results []map[string]interface{}) []map[string]interf
 				processedRow[key] = v
 			}
 		}
-		
+
 		processedResults[i] = processedRow
 	}
-	
+
 	return processedResults
 }
 
@@ -147,28 +148,58 @@ func (s *Server) Close() error {
 }
 
 func main() {
+	// Add command line flags
+	queryFlag := flag.String("query", "", "Execute a single query and exit")
+	dbFlag := flag.String("db", "mydb", "Database name to query")
+	flag.Parse()
+
 	// Get configuration from environment variables
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
-	
+
 	dataDir := os.Getenv("DATA_DIR")
 	if dataDir == "" {
 		dataDir = "./data"
 	}
-	
-	// Create server
+
+	// Create QueryClient
+	client := NewQueryClient(dataDir)
+	err := client.Initialize()
+	if err != nil {
+		log.Fatalf("Failed to initialize query client: %v", err)
+	}
+	defer client.Close()
+
+	// If query flag is provided, execute query and exit
+	if *queryFlag != "" {
+		results, err := client.Query(*queryFlag, *dbFlag)
+		if err != nil {
+			log.Fatalf("Query error: %v", err)
+		}
+
+		// Process and print results as JSON
+		processedResults := processResultsForJSON(results)
+		jsonData, err := json.MarshalIndent(processedResults, "", "  ")
+		if err != nil {
+			log.Fatalf("Failed to marshal results: %v", err)
+		}
+		fmt.Println(string(jsonData))
+		return
+	}
+
+	// Create server for HTTP mode
 	server, err := NewServer(dataDir)
 	if err != nil {
 		log.Fatalf("Failed to initialize server: %v", err)
 	}
 	defer server.Close()
-	
+
 	// Set up routes
 	http.HandleFunc("/health", server.handleHealth)
 	http.HandleFunc("/query", server.handleQuery)
-	
+
 	// Start server
 	log.Printf("GigAPI server running at http://localhost:%s", port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
