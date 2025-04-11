@@ -49,7 +49,7 @@ The GigAPI Querier can also be used in CLI mode to execute an individual query
 $ ./gigapi --query "SELECT count(*), avg(temperature) FROM weather" --db mydb
 ```
 ```json
-[{"avg(temperature)": 87.025,"count_star()": "40"}]
+{"results":[{"avg(temperature)":87.025,"count_star()":"40"}]}
 ```
 
 ## <img src="https://github.com/user-attachments/assets/a9aa3ebd-9164-476d-aedf-97b817078350" width=24 /> Data Structure
