@@ -1,5 +1,9 @@
 name: Release Binary
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
 on:
   release:
     types: [prereleased, released]
