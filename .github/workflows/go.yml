@@ -2,7 +2,7 @@ name: Release Binary
 
 on:
   release:
-    types: [created, edited, prereleased, released]
+    types: [prereleased, released]
 
 permissions:
   contents: write
