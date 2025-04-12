@@ -7,5 +7,5 @@ RUN go build -o gigapi_querier .
 FROM alpine:latest
 RUN apk --no-cache add ca-certificates
 WORKDIR /
-COPY --from=builder /gigapi_querier .
+COPY --from=builder /app/gigapi_querier .
 CMD ["/gigapi_querier"]
