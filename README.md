@@ -24,15 +24,12 @@ PORT=8080 DATA_DIR=./data ./gigapi
 ### Query Data
 
 ```bash
-POST /query?db=mydb
-Content-Type: application/json
-
-{
-  "query": "SELECT time, location, temperature FROM weather WHERE time >= '2025-04-01T00:00:00'"
-}
+$ curl -X POST "http://localhost:9999/query?db=mydb" \
+  -H "Content-Type: application/json"  \
+{"query": "SELECT time, location, temperature FROM weather WHERE time >= '2025-04-01T00:00:00'"}
 ```
 
-Series can be used with or without time ranges, ie for calculating averages, etc.
+Series can be used with or without time ranges, ie for counting, calculating averages, etc.
 
 ```bash
 $ curl -X POST "http://localhost:9999/query?db=mydb" \
