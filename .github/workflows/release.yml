@@ -23,36 +23,27 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        goos: [linux]
     steps:
     - uses: actions/checkout@v4
       with:
-        submodules: true
-        
+        submodules: true   
     - name: Set up Go
       uses: actions/setup-go@v3
       with:
         go-version: 1.24
-
     - run: |
         echo "VERSION=${{ (github.ref_name == 'main' && github.event_name == 'workflow_dispatch') && github.event.inputs.ref_name || github.ref_name }}" >> $GITHUB_ENV
-
     - name: Compile HEPAgent ${{ matrix.goarch }}
       run: |
         go mod tidy
         go build --ldflags '-linkmode=external -extldflags=-static' -o gigapi_querier ./
-
     - name: glibc polyfill
-      if: ${{ matrix.goarch == 'amd64' }}
       run: |
         CONTAINER_ID=$(docker create ghcr.io/lmangani/polyfill-glibc-action:latest) 
         docker cp $CONTAINER_ID:/usr/local/bin/polyfill-glibc ./polyfill-glibc
         docker rm $CONTAINER_ID
         chmod +x ./polyfill-glibc
         ./polyfill-glibc --target-glibc=2.17 ./gigapi_querier
-
     - name: Upload release
       if:  github.event_name == 'release' || ${{ inputs.release }}
       uses: boxpositron/upload-multiple-releases@1.0.7
@@ -69,6 +60,9 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
     strategy:
       matrix:
         goos: [linux]
@@ -96,7 +90,6 @@ jobs:
         tags: |
           latest
           ${{ (github.event_name == 'workflow_dispatch') && github.event.inputs.ref_name || github.ref_name }}
-          
     - name: Build and push
       uses: docker/build-push-action@v6.13.0
       with:
@@ -106,4 +99,3 @@ jobs:
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         platforms: linux/amd64,linux/arm64
-        overwrite: true
