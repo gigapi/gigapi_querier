@@ -6,6 +6,23 @@ GigAPI Go provides a SQL interface to query time-series using GigAPI Catalog Met
 
 ## <img src="https://github.com/user-attachments/assets/a9aa3ebd-9164-476d-aedf-97b817078350" width=24 /> Quick Start
 
+### Docker
+Run `gigapi-querier` using Docker making sure the proper `data` folder or `S3` bucket is provided
+```yaml
+gigapipe:
+  image: ghcr.io/gigapi/gigapi-querier:latest
+  container_name: gigapi-querier
+  hostname: gigapi-querier
+  volumes:
+    - ./data:/data
+  ports:
+    - "8080:8080"
+  environment:
+    - DATA_DIR=/data
+    - PORT=8080
+```
+
+### Build
 ```bash
 # Build from source
 go build -o gigapi *.go
