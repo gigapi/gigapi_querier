@@ -64,6 +64,7 @@ jobs:
         release_name: ${{ env.VERSION }}
         draft: false
         prerelease: false
+        overwrite: true
 
   docker:
     runs-on: ubuntu-latest
@@ -72,6 +73,9 @@ jobs:
         goos: [linux]
         goarch: [amd64, arm64]
     steps:
+     - uses: actions/checkout@v4
+      with:
+        submodules: true
     - name: Set up QEMU
       uses: docker/setup-qemu-action@v3.3.0
     - name: Set up Docker Buildx
