@@ -1,4 +1,4 @@
-name: Release Binary
+name: Go Build CI
 
 on:
   push:
