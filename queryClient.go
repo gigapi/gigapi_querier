@@ -2,15 +2,14 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
-	"database/sql"
 
 	_ "github.com/marcboeker/go-duckdb/v2"
 )
@@ -58,8 +57,8 @@ type ParsedQuery struct {
 
 // TimeRange represents a query time range
 type TimeRange struct {
-	Start        *int64
-	End          *int64
+	Start         *int64
+	End           *int64
 	TimeCondition string
 }
 
@@ -68,7 +67,7 @@ func (q *QueryClient) ParseQuery(sql, dbName string) (*ParsedQuery, error) {
 	// Normalize whitespace
 	sql = regexp.MustCompile(`\s+`).ReplaceAllString(sql, " ")
 	sql = strings.TrimSpace(sql)
-	
+
 	// Extract columns
 	columnsPattern := regexp.MustCompile(`(?i)SELECT\s+(.*?)\s+FROM`)
 	columnsMatch := columnsPattern.FindStringSubmatch(sql)
@@ -76,27 +75,27 @@ func (q *QueryClient) ParseQuery(sql, dbName string) (*ParsedQuery, error) {
 	if len(columnsMatch) > 1 {
 		columns = strings.TrimSpace(columnsMatch[1])
 	}
-	
+
 	// Extract measurement name
 	fromPattern := regexp.MustCompile(`(?i)FROM\s+(?:(\w+)\.)?(\w+)`)
 	fromMatch := fromPattern.FindStringSubmatch(sql)
 	if len(fromMatch) < 3 {
 		return nil, fmt.Errorf("invalid query: FROM clause not found or invalid")
 	}
-	
+
 	// If db name is in the query, use it, otherwise use the provided dbName
 	queryDbName := dbName
 	if fromMatch[1] != "" {
 		queryDbName = fromMatch[1]
 	}
 	measurement := fromMatch[2]
-	
+
 	// Extract WHERE clause
 	whereClause := ""
 	whereParts := strings.Split(sql, " WHERE ")
 	if len(whereParts) >= 2 {
 		whereClause = whereParts[1]
-		
+
 		// Remove other clauses
 		for _, clause := range []string{" GROUP BY ", " ORDER BY ", " LIMIT ", " HAVING "} {
 			if idx := strings.Index(strings.ToUpper(whereClause), clause); idx != -1 {
@@ -104,10 +103,10 @@ func (q *QueryClient) ParseQuery(sql, dbName string) (*ParsedQuery, error) {
 			}
 		}
 	}
-	
+
 	// Extract time range
 	timeRange := q.extractTimeRange(whereClause)
-	
+
 	// Extract other clauses
 	orderBy := ""
 	orderByPattern := regexp.MustCompile(`(?i)ORDER\s+BY\s+(.*?)(?:\s+(?:LIMIT|GROUP|HAVING|$))`)
@@ -115,28 +114,28 @@ func (q *QueryClient) ParseQuery(sql, dbName string) (*ParsedQuery, error) {
 	if len(orderByMatch) > 1 {
 		orderBy = strings.TrimSpace(orderByMatch[1])
 	}
-	
+
 	groupBy := ""
 	groupByPattern := regexp.MustCompile(`(?i)GROUP\s+BY\s+(.*?)(?:\s+(?:ORDER|LIMIT|HAVING|$))`)
 	groupByMatch := groupByPattern.FindStringSubmatch(sql)
 	if len(groupByMatch) > 1 {
 		groupBy = strings.TrimSpace(groupByMatch[1])
 	}
-	
+
 	having := ""
 	havingPattern := regexp.MustCompile(`(?i)HAVING\s+(.*?)(?:\s+(?:ORDER|LIMIT|$))`)
 	havingMatch := havingPattern.FindStringSubmatch(sql)
 	if len(havingMatch) > 1 {
 		having = strings.TrimSpace(havingMatch[1])
 	}
-	
+
 	limit := 0
 	limitPattern := regexp.MustCompile(`(?i)LIMIT\s+(\d+)`)
 	limitMatch := limitPattern.FindStringSubmatch(sql)
 	if len(limitMatch) > 1 {
 		fmt.Sscanf(limitMatch[1], "%d", &limit)
 	}
-	
+
 	return &ParsedQuery{
 		Columns:         columns,
 		DbName:          queryDbName,
@@ -153,23 +152,23 @@ func (q *QueryClient) ParseQuery(sql, dbName string) (*ParsedQuery, error) {
 // Extract time range from WHERE clause
 func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 	timeRange := TimeRange{
-		Start:        nil,
-		End:          nil,
+		Start:         nil,
+		End:           nil,
 		TimeCondition: "",
 	}
-	
+
 	if whereClause == "" {
 		return timeRange
 	}
-	
+
 	// Match time patterns
 	timePatterns := []*regexp.Regexp{
-		regexp.MustCompile(`time\s*(>=|>)\s*'([^']+)'`),          // time >= '2023-01-01T00:00:00'
-		regexp.MustCompile(`time\s*(<=|<)\s*'([^']+)'`),          // time <= '2023-01-01T00:00:00'
-		regexp.MustCompile(`time\s*=\s*'([^']+)'`),               // time = '2023-01-01T00:00:00'
+		regexp.MustCompile(`time\s*(>=|>)\s*'([^']+)'`),                    // time >= '2023-01-01T00:00:00'
+		regexp.MustCompile(`time\s*(<=|<)\s*'([^']+)'`),                    // time <= '2023-01-01T00:00:00'
+		regexp.MustCompile(`time\s*=\s*'([^']+)'`),                         // time = '2023-01-01T00:00:00'
 		regexp.MustCompile(`time\s+BETWEEN\s+'([^']+)'\s+AND\s+'([^']+)'`), // time BETWEEN '...' AND '...'
 	}
-	
+
 	// Check for BETWEEN pattern first
 	if match := timePatterns[3].FindStringSubmatch(whereClause); len(match) > 2 {
 		startTime, err := time.Parse(time.RFC3339Nano, match[1])
@@ -177,17 +176,17 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 			startNanos := startTime.UnixNano()
 			timeRange.Start = &startNanos
 		}
-		
+
 		endTime, err := time.Parse(time.RFC3339Nano, match[2])
 		if err == nil {
 			endNanos := endTime.UnixNano()
 			timeRange.End = &endNanos
 		}
-		
+
 		timeRange.TimeCondition = fmt.Sprintf("time BETWEEN '%s' AND '%s'", match[1], match[2])
 		return timeRange
 	}
-	
+
 	// Check for >= pattern
 	if match := timePatterns[0].FindStringSubmatch(whereClause); len(match) > 2 {
 		startTime, err := time.Parse(time.RFC3339Nano, match[2])
@@ -197,7 +196,7 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 		}
 		timeRange.TimeCondition = fmt.Sprintf("time %s '%s'", match[1], match[2])
 	}
-	
+
 	// Check for <= pattern
 	if match := timePatterns[1].FindStringSubmatch(whereClause); len(match) > 2 {
 		endTime, err := time.Parse(time.RFC3339Nano, match[2])
@@ -205,14 +204,14 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 			endNanos := endTime.UnixNano()
 			timeRange.End = &endNanos
 		}
-		
+
 		if timeRange.TimeCondition != "" {
 			timeRange.TimeCondition = fmt.Sprintf("%s AND time %s '%s'", timeRange.TimeCondition, match[1], match[2])
 		} else {
 			timeRange.TimeCondition = fmt.Sprintf("time %s '%s'", match[1], match[2])
 		}
 	}
-	
+
 	// Check for = pattern
 	if match := timePatterns[2].FindStringSubmatch(whereClause); len(match) > 1 {
 		exactTime, err := time.Parse(time.RFC3339Nano, match[1])
@@ -223,18 +222,18 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 		}
 		timeRange.TimeCondition = fmt.Sprintf("time = '%s'", match[1])
 	}
-	
+
 	return timeRange
 }
 
 // MetadataFile represents a metadata.json file structure
 type MetadataFile struct {
-	Type            string       `json:"type"`
-	ParquetSizeBytes int         `json:"parquet_size_bytes"`
-	RowCount        int          `json:"row_count"`
-	MinTime         int64        `json:"min_time"`
-	MaxTime         int64        `json:"max_time"`
-	Files           []ParquetFile `json:"files"`
+	Type             string        `json:"type"`
+	ParquetSizeBytes int           `json:"parquet_size_bytes"`
+	RowCount         int           `json:"row_count"`
+	MinTime          int64         `json:"min_time"`
+	MaxTime          int64         `json:"max_time"`
+	Files            []ParquetFile `json:"files"`
 }
 
 // ParquetFile represents a single parquet file entry in metadata
@@ -252,9 +251,9 @@ func (q *QueryClient) FindRelevantFiles(dbName, measurement string, timeRange Ti
 	if timeRange.Start == nil && timeRange.End == nil {
 		return q.findAllFiles(dbName, measurement)
 	}
-	
+
 	var relevantFiles []string
-	
+
 	// Convert nanosecond timestamps to time.Time for directory parsing
 	var startDate, endDate time.Time
 	if timeRange.Start != nil {
@@ -262,19 +261,19 @@ func (q *QueryClient) FindRelevantFiles(dbName, measurement string, timeRange Ti
 	} else {
 		startDate = time.Unix(0, 0) // Beginning of epoch
 	}
-	
+
 	if timeRange.End != nil {
 		endDate = time.Unix(0, *timeRange.End)
 	} else {
 		endDate = time.Now() // Current time
 	}
-	
+
 	// Get all date directories that might contain relevant data
 	dateDirectories, err := q.getDateDirectoriesInRange(dbName, measurement, startDate, endDate)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	for _, dateDir := range dateDirectories {
 		// For each date directory, get all hour directories
 		datePath := filepath.Join(q.DataDir, dbName, measurement, dateDir)
@@ -282,40 +281,40 @@ func (q *QueryClient) FindRelevantFiles(dbName, measurement string, timeRange Ti
 		if err != nil {
 			continue // Skip this directory on error
 		}
-		
+
 		for _, hourDir := range hourDirs {
 			hourPath := filepath.Join(datePath, hourDir)
-			
+
 			// Read metadata.json
 			metadataPath := filepath.Join(hourPath, "metadata.json")
 			if _, err := os.Stat(metadataPath); os.IsNotExist(err) {
 				continue
 			}
-			
-			metadataBytes, err := ioutil.ReadFile(metadataPath)
+
+			metadataBytes, err := os.ReadFile(metadataPath)
 			if err != nil {
 				continue
 			}
-			
+
 			var metadata MetadataFile
 			if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
 				continue
 			}
-			
+
 			// Skip if metadata time range doesn't overlap with requested time range
-			if timeRange.Start != nil && timeRange.End != nil && 
-			   (metadata.MaxTime < *timeRange.Start || metadata.MinTime > *timeRange.End) {
+			if timeRange.Start != nil && timeRange.End != nil &&
+				(metadata.MaxTime < *timeRange.Start || metadata.MinTime > *timeRange.End) {
 				continue
 			}
-			
+
 			// Check each file in metadata
 			for _, file := range metadata.Files {
 				// Skip if file time range doesn't overlap with requested time range
 				if timeRange.Start != nil && timeRange.End != nil &&
-				   (file.MaxTime < *timeRange.Start || file.MinTime > *timeRange.End) {
+					(file.MaxTime < *timeRange.Start || file.MinTime > *timeRange.End) {
 					continue
 				}
-				
+
 				// Check if the file exists at the given path
 				if _, err := os.Stat(file.Path); err == nil {
 					relevantFiles = append(relevantFiles, file.Path)
@@ -327,9 +326,9 @@ func (q *QueryClient) FindRelevantFiles(dbName, measurement string, timeRange Ti
 					}
 				}
 			}
-			
+
 			// Also check for any parquet files directly in this directory
-			files, err := ioutil.ReadDir(hourPath)
+			files, err := os.ReadDir(hourPath)
 			if err == nil {
 				for _, f := range files {
 					if !f.IsDir() && strings.HasSuffix(f.Name(), ".parquet") {
@@ -339,7 +338,7 @@ func (q *QueryClient) FindRelevantFiles(dbName, measurement string, timeRange Ti
 			}
 		}
 	}
-	
+
 	return relevantFiles, nil
 }
 
@@ -347,21 +346,21 @@ func (q *QueryClient) FindRelevantFiles(dbName, measurement string, timeRange Ti
 func (q *QueryClient) findAllFiles(dbName, measurement string) ([]string, error) {
 	var allFiles []string
 	basePath := filepath.Join(q.DataDir, dbName, measurement)
-	
+
 	if _, err := os.Stat(basePath); os.IsNotExist(err) {
 		return allFiles, nil
 	}
-	
+
 	// Recursively find all parquet files
 	err := filepath.Walk(basePath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // Skip errors
 		}
-		
+
 		if !info.IsDir() {
 			// If it's a metadata.json file, parse it to get parquet files
 			if info.Name() == "metadata.json" {
-				metadataBytes, err := ioutil.ReadFile(path)
+				metadataBytes, err := os.ReadFile(path)
 				if err == nil {
 					var metadata MetadataFile
 					if err := json.Unmarshal(metadataBytes, &metadata); err == nil {
@@ -383,14 +382,14 @@ func (q *QueryClient) findAllFiles(dbName, measurement string) ([]string, error)
 				allFiles = append(allFiles, path)
 			}
 		}
-		
+
 		return nil
 	})
-	
+
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return allFiles, nil
 }
 
@@ -400,41 +399,41 @@ func (q *QueryClient) getDateDirectoriesInRange(dbName, measurement string, star
 	if _, err := os.Stat(basePath); os.IsNotExist(err) {
 		return nil, err
 	}
-	
-	entries, err := ioutil.ReadDir(basePath)
+
+	entries, err := os.ReadDir(basePath)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var dateDirs []string
 	datePattern := regexp.MustCompile(`^date=(.+)$`)
-	
+
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
-		
+
 		matches := datePattern.FindStringSubmatch(entry.Name())
 		if len(matches) < 2 {
 			continue
 		}
-		
+
 		dateStr := matches[1]
 		dirDate, err := time.Parse("2006-01-02", dateStr)
 		if err != nil {
 			continue
 		}
-		
+
 		// Check if directory date is within range
 		dirDateOnly := time.Date(dirDate.Year(), dirDate.Month(), dirDate.Day(), 0, 0, 0, 0, time.UTC)
 		startDateOnly := time.Date(startDate.Year(), startDate.Month(), startDate.Day(), 0, 0, 0, 0, time.UTC)
 		endDateOnly := time.Date(endDate.Year(), endDate.Month(), endDate.Day(), 0, 0, 0, 0, time.UTC)
-		
+
 		if !dirDateOnly.Before(startDateOnly) && !dirDateOnly.After(endDateOnly) {
 			dateDirs = append(dateDirs, entry.Name())
 		}
 	}
-	
+
 	return dateDirs, nil
 }
 
@@ -443,43 +442,43 @@ func (q *QueryClient) getHourDirectoriesInRange(datePath string, startDate, endD
 	if _, err := os.Stat(datePath); os.IsNotExist(err) {
 		return nil, err
 	}
-	
-	entries, err := ioutil.ReadDir(datePath)
+
+	entries, err := os.ReadDir(datePath)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var hourDirs []string
 	hourPattern := regexp.MustCompile(`^hour=(\d+)$`)
 	datePattern := regexp.MustCompile(`^date=(.+)$`)
-	
+
 	dateMatches := datePattern.FindStringSubmatch(filepath.Base(datePath))
 	if len(dateMatches) < 2 {
 		return hourDirs, nil
 	}
-	
+
 	dateStr := dateMatches[1]
 	dirDate, err := time.Parse("2006-01-02", dateStr)
 	if err != nil {
 		return hourDirs, nil
 	}
-	
+
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
-		
+
 		matches := hourPattern.FindStringSubmatch(entry.Name())
 		if len(matches) < 2 {
 			continue
 		}
-		
+
 		hour := 0
 		fmt.Sscanf(matches[1], "%d", &hour)
-		
+
 		// Same day comparison logic
 		if dirDate.Year() == startDate.Year() && dirDate.Month() == startDate.Month() && dirDate.Day() == startDate.Day() &&
-		   dirDate.Year() == endDate.Year() && dirDate.Month() == endDate.Month() && dirDate.Day() == endDate.Day() {
+			dirDate.Year() == endDate.Year() && dirDate.Month() == endDate.Month() && dirDate.Day() == endDate.Day() {
 			// Same day, filter by hour
 			if hour >= startDate.Hour() && hour <= endDate.Hour() {
 				hourDirs = append(hourDirs, entry.Name())
@@ -499,24 +498,66 @@ func (q *QueryClient) getHourDirectoriesInRange(datePath string, startDate, endD
 			hourDirs = append(hourDirs, entry.Name())
 		}
 	}
-	
+
 	return hourDirs, nil
 }
 
-// Execute query
-func (q *QueryClient) Query(sql, dbName string) ([]map[string]interface{}, error) {
+// Query executes a query against the database
+func (c *QueryClient) Query(query, dbName string) ([]map[string]interface{}, error) {
+	// Check for special commands
+	query = strings.TrimSpace(query)
+	upperQuery := strings.ToUpper(query)
+
+	// Handle special commands
+	switch upperQuery {
+	case "SHOW DATABASES":
+		entries, err := os.ReadDir(c.DataDir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read data directory: %v", err)
+		}
+
+		results := make([]map[string]interface{}, 0)
+		for _, entry := range entries {
+			if entry.IsDir() {
+				results = append(results, map[string]interface{}{
+					"database_name": entry.Name(),
+				})
+			}
+		}
+		return results, nil
+
+	case "SHOW TABLES":
+		// List directories inside the database folder
+		dbPath := filepath.Join(c.DataDir, dbName)
+		entries, err := os.ReadDir(dbPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read database directory: %v", err)
+		}
+
+		results := make([]map[string]interface{}, 0)
+		for _, entry := range entries {
+			if entry.IsDir() {
+				results = append(results, map[string]interface{}{
+					"table_name": entry.Name(),
+				})
+			}
+		}
+		return results, nil
+	}
+
+	// Handle regular queries through DuckDB
 	// Parse the query
-	parsed, err := q.ParseQuery(sql, dbName)
+	parsed, err := c.ParseQuery(query, dbName)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Find relevant files
-	files, err := q.FindRelevantFiles(parsed.DbName, parsed.Measurement, parsed.TimeRange)
+	files, err := c.FindRelevantFiles(parsed.DbName, parsed.Measurement, parsed.TimeRange)
 	if err != nil || len(files) == 0 {
 		return nil, fmt.Errorf("no relevant files found for query")
 	}
-	
+
 	// Build the DuckDB query
 	var filesList strings.Builder
 	for i, file := range files {
@@ -525,116 +566,116 @@ func (q *QueryClient) Query(sql, dbName string) ([]map[string]interface{}, error
 		}
 		filesList.WriteString(fmt.Sprintf("'%s'", file))
 	}
-	
+
 	// Split the original query and rebuild with file list
-	originalParts := strings.SplitN(sql, " FROM ", 2)
+	originalParts := strings.SplitN(query, " FROM ", 2)
 	var duckdbQuery string
-	
+
 	if len(originalParts) >= 2 {
 		// Extract table name pattern to replace
 		tablePattern := fmt.Sprintf(`(?:%s\.)?%s\b`, parsed.DbName, parsed.Measurement)
 		tableRegex := regexp.MustCompile(tablePattern)
 		restOfQuery := tableRegex.ReplaceAllString(originalParts[1], "")
-		
+
 		if len(strings.TrimSpace(restOfQuery)) > 0 {
 			// Fix timestamp format - ensure timestamps have quotes
 			timestampRegex := regexp.MustCompile(`([^'])(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)`)
 			restOfQuery = timestampRegex.ReplaceAllString(restOfQuery, "$1'$2'")
-			
-			duckdbQuery = fmt.Sprintf("%s FROM read_parquet([%s], union_by_name=true) %s", 
+
+			duckdbQuery = fmt.Sprintf("%s FROM read_parquet([%s], union_by_name=true) %s",
 				originalParts[0], filesList.String(), restOfQuery)
 		} else {
-			duckdbQuery = fmt.Sprintf("%s FROM read_parquet([%s], union_by_name=true)", 
+			duckdbQuery = fmt.Sprintf("%s FROM read_parquet([%s], union_by_name=true)",
 				originalParts[0], filesList.String())
 		}
 	} else {
 		// Fallback to manually constructing the query
-		duckdbQuery = fmt.Sprintf("SELECT %s FROM read_parquet([%s], union_by_name=true)", 
+		duckdbQuery = fmt.Sprintf("SELECT %s FROM read_parquet([%s], union_by_name=true)",
 			parsed.Columns, filesList.String())
-		
+
 		// Add WHERE conditions
 		if parsed.TimeRange.TimeCondition != "" || len(parsed.WhereConditions) > 0 {
 			var conditions []string
-			
+
 			if parsed.TimeRange.TimeCondition != "" {
 				conditions = append(conditions, parsed.TimeRange.TimeCondition)
 			}
-			
+
 			if len(parsed.WhereConditions) > 0 {
 				// Fix timestamp format in WHERE clause
 				timestampRegex := regexp.MustCompile(`([^'])(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)`)
 				processedCond := timestampRegex.ReplaceAllString(parsed.WhereConditions, "$1'$2'")
 				conditions = append(conditions, processedCond)
 			}
-			
+
 			if len(conditions) > 0 {
 				duckdbQuery += " WHERE " + strings.Join(conditions, " AND ")
 			}
 		}
-		
+
 		// Add GROUP BY, HAVING, ORDER BY, and LIMIT
 		if len(parsed.GroupBy) > 0 {
 			duckdbQuery += " GROUP BY " + parsed.GroupBy
 		}
-		
+
 		if len(parsed.Having) > 0 {
 			duckdbQuery += " HAVING " + parsed.Having
 		}
-		
+
 		if len(parsed.OrderBy) > 0 {
 			duckdbQuery += " ORDER BY " + parsed.OrderBy
 		}
-		
+
 		if parsed.Limit > 0 {
 			duckdbQuery += fmt.Sprintf(" LIMIT %d", parsed.Limit)
 		}
 	}
-	
+
 	// Execute the query
-	stmt, err := q.DB.Prepare(duckdbQuery)
+	stmt, err := c.DB.Prepare(duckdbQuery)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare query: %v", err)
 	}
 	defer stmt.Close()
-	
+
 	rows, err := stmt.Query()
 	if err != nil {
 		return nil, fmt.Errorf("query execution failed: %v", err)
 	}
 	defer rows.Close()
-	
+
 	// Get column names
 	columns, err := rows.Columns()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get columns: %v", err)
 	}
-	
+
 	// Prepare result structure
 	var result []map[string]interface{}
-	
+
 	// Process rows
 	for rows.Next() {
 		// Create a slice of interface{} to hold the values
 		values := make([]interface{}, len(columns))
 		valuePtrs := make([]interface{}, len(columns))
-		
+
 		// Set up pointers to each interface{}
 		for i := range values {
 			valuePtrs[i] = &values[i]
 		}
-		
+
 		// Scan the row into the values
 		if err := rows.Scan(valuePtrs...); err != nil {
 			return nil, fmt.Errorf("error scanning row: %v", err)
 		}
-		
+
 		// Create a map for this row
 		row := make(map[string]interface{})
-		
+
 		// Set each column in the map
 		for i, col := range columns {
 			val := values[i]
-			
+
 			// Handle special cases for counts
 			if strings.Contains(col, "count") && val == nil {
 				row[col] = 0
@@ -642,14 +683,14 @@ func (q *QueryClient) Query(sql, dbName string) ([]map[string]interface{}, error
 				row[col] = val
 			}
 		}
-		
+
 		result = append(result, row)
 	}
-	
+
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating rows: %v", err)
 	}
-	
+
 	return result, nil
 }
 
