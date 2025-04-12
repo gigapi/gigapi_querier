@@ -1,8 +1,11 @@
 name: Release Binary
 
 on:
-  release:
-    types: [prereleased, released]
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
 
 permissions:
   contents: write
@@ -19,12 +22,8 @@ jobs:
       with:
         go-version: '1.23'
 
-    - name: Build
+    - name: Test Build
       run: |
         go mod tidy
         go build --ldflags '-linkmode=external -extldflags=-static' -o gigapi_querier ./
 
-    - uses: actions/upload-artifact@v4
-      with:
-        name: gigapi_querier
-        path: gigapi_querier
