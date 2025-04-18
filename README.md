@@ -4,6 +4,10 @@
 
 GigAPI Go provides a SQL interface to query time-series using GigAPI Catalog Metadata and DuckDB
 
+> [!WARNING]  
+> GigAPI is an open beta developed in public. Bugs and changes should be expected. Use at your own risk.
+> 
+
 ## <img src="https://github.com/user-attachments/assets/a9aa3ebd-9164-476d-aedf-97b817078350" width=24 /> Quick Start
 
 ### Docker
