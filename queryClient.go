@@ -245,6 +245,56 @@ type ParquetFile struct {
 	MaxTime   int64  `json:"max_time"`
 }
 
+func (q *QueryClient) enumFolderWithMetadata(metadataPath string, timeRange TimeRange) ([]string, error) {
+	metadataBytes, err := os.ReadFile(metadataPath)
+	if err != nil {
+		return nil, err
+	}
+
+	var metadata MetadataFile
+	if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
+		return nil, err
+	}
+
+	// Skip if metadata time range doesn't overlap with requested time range
+	if timeRange.Start != nil && timeRange.End != nil &&
+		(metadata.MaxTime < *timeRange.Start || metadata.MinTime > *timeRange.End) {
+		return []string{}, nil
+	}
+
+	var res []string
+
+	// Check each file in metadata
+	for _, file := range metadata.Files {
+		// Skip if file time range doesn't overlap with requested time range
+		if timeRange.Start != nil && timeRange.End != nil &&
+			(file.MaxTime < *timeRange.Start || file.MinTime > *timeRange.End) {
+			continue
+		}
+
+		// Check if the file exists at the given path
+		if _, err := os.Stat(file.Path); err == nil {
+			res = append(res, file.Path)
+		}
+	}
+	return res, nil
+}
+
+func (q *QueryClient) enumFolderNoMetadata(path string) ([]string, error) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, err
+	}
+	res := make([]string, len(entries))
+	for i, entry := range entries {
+		name := entry.Name()
+		if strings.HasSuffix(name, ".parquet") {
+			res[i] = filepath.Join(path, entries[i].Name())
+		}
+	}
+	return res, nil
+}
+
 // Find relevant parquet files based on time range
 func (q *QueryClient) FindRelevantFiles(dbName, measurement string, timeRange TimeRange) ([]string, error) {
 	// If no time range specified, get all files
@@ -287,54 +337,18 @@ func (q *QueryClient) FindRelevantFiles(dbName, measurement string, timeRange Ti
 
 			// Read metadata.json
 			metadataPath := filepath.Join(hourPath, "metadata.json")
-			if _, err := os.Stat(metadataPath); os.IsNotExist(err) {
-				continue
-			}
-
-			metadataBytes, err := os.ReadFile(metadataPath)
-			if err != nil {
-				continue
-			}
-
-			var metadata MetadataFile
-			if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
-				continue
-			}
-
-			// Skip if metadata time range doesn't overlap with requested time range
-			if timeRange.Start != nil && timeRange.End != nil &&
-				(metadata.MaxTime < *timeRange.Start || metadata.MinTime > *timeRange.End) {
-				continue
-			}
-
-			// Check each file in metadata
-			for _, file := range metadata.Files {
-				// Skip if file time range doesn't overlap with requested time range
-				if timeRange.Start != nil && timeRange.End != nil &&
-					(file.MaxTime < *timeRange.Start || file.MinTime > *timeRange.End) {
+			if _, err := os.Stat(metadataPath); err == nil {
+				_relevantFiles, err := q.enumFolderWithMetadata(metadataPath, timeRange)
+				if err == nil {
+					relevantFiles = append(relevantFiles, _relevantFiles...)
 					continue
 				}
-
-				// Check if the file exists at the given path
-				if _, err := os.Stat(file.Path); err == nil {
-					relevantFiles = append(relevantFiles, file.Path)
-				} else {
-					// Try a relative path based on metadata location
-					relPath := filepath.Join(hourPath, filepath.Base(file.Path))
-					if _, err := os.Stat(relPath); err == nil {
-						relevantFiles = append(relevantFiles, relPath)
-					}
-				}
 			}
 
-			// Also check for any parquet files directly in this directory
-			files, err := os.ReadDir(hourPath)
+			_relevantFiles, err := q.enumFolderNoMetadata(hourPath)
 			if err == nil {
-				for _, f := range files {
-					if !f.IsDir() && strings.HasSuffix(f.Name(), ".parquet") {
-						relevantFiles = append(relevantFiles, filepath.Join(hourPath, f.Name()))
-					}
-				}
+				relevantFiles = append(relevantFiles, _relevantFiles...)
+				continue
 			}
 		}
 	}
@@ -357,10 +371,9 @@ func (q *QueryClient) findAllFiles(dbName, measurement string) ([]string, error)
 			return nil // Skip errors
 		}
 
-		if !info.IsDir() {
-			// If it's a metadata.json file, parse it to get parquet files
-			if info.Name() == "metadata.json" {
-				metadataBytes, err := os.ReadFile(path)
+		if info.IsDir() {
+			if _, err := os.Stat(filepath.Join(path, "metadata.json")); err == nil {
+				metadataBytes, err := os.ReadFile(filepath.Join(path, "metadata.json"))
 				if err == nil {
 					var metadata MetadataFile
 					if err := json.Unmarshal(metadataBytes, &metadata); err == nil {
@@ -377,7 +390,12 @@ func (q *QueryClient) findAllFiles(dbName, measurement string) ([]string, error)
 						}
 					}
 				}
-			} else if strings.HasSuffix(info.Name(), ".parquet") {
+				return filepath.SkipDir
+			}
+		}
+
+		if !info.IsDir() {
+			if strings.HasSuffix(info.Name(), ".parquet") {
 				// Direct parquet file
 				allFiles = append(allFiles, path)
 			}
