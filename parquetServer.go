@@ -32,8 +32,8 @@ func NewParquetServer(dataDir string) (*ParquetServer, error) {
 func (s *ParquetServer) Start(port int) error {
 	r := mux.NewRouter()
 
-	// Route for accessing virtual parquet files
-	r.HandleFunc("/parquet/{db}/{measurement}", s.handleParquetRequest).Methods("GET")
+	// Route for accessing virtual parquet files - handle both GET and HEAD
+	r.HandleFunc("/parquet/{db}/{measurement}", s.handleParquetRequest).Methods("GET", "HEAD")
 	
 	// Route for getting schema information
 	r.HandleFunc("/schema/{db}/{measurement}", s.handleSchemaRequest).Methods("GET")
@@ -76,18 +76,32 @@ func (s *ParquetServer) handleParquetRequest(w http.ResponseWriter, r *http.Requ
 	timeRange := s.parseTimeRange(r.URL.Query())
 	filters := s.parseFilters(r.URL.Query())
 
-	// Parse streaming configuration from query parameters
-	config := s.parseStreamConfig(r.URL.Query())
+	// Verify that we have data available
+	files, err := s.queryClient.FindRelevantFiles(dbName, measurement, timeRange)
+	if err != nil || len(files) == 0 {
+		http.Error(w, "No data found", http.StatusNotFound)
+		return
+	}
 
-	// Build the query
-	query := s.buildVirtualParquetQuery(dbName, measurement, timeRange, filters)
-
-	// Set response headers
+	// Set common headers
 	w.Header().Set("Content-Type", "application/vnd.apache.parquet")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s_%s.parquet", 
 		measurement, time.Now().Format("20060102150405")))
+	
+	// Add headers that DuckDB expects
+	w.Header().Set("Accept-Ranges", "bytes")
+	// We don't know the exact size, but DuckDB needs a size header
+	w.Header().Set("Content-Length", "1048576") // Use a reasonable default
 
-	// Stream results with configuration
+	// For HEAD requests, we're done
+	if r.Method == "HEAD" {
+		return
+	}
+
+	// For GET requests, continue with streaming the data
+	config := s.parseStreamConfig(r.URL.Query())
+	query := s.buildVirtualParquetQuery(dbName, measurement, timeRange, filters)
+
 	if err := s.queryClient.StreamParquetResultsWithConfig(query, dbName, w, config); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to stream results: %v", err), http.StatusInternalServerError)
 		return

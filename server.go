@@ -219,7 +219,7 @@ func main() {
 
 	// Set up parquet routes
 	router := mux.NewRouter()
-	router.HandleFunc("/parquet/{db}/{measurement}", server.ParquetServer.handleParquetRequest).Methods("GET")
+	router.HandleFunc("/parquet/{db}/{measurement}", server.ParquetServer.handleParquetRequest).Methods("GET", "HEAD")
 	router.HandleFunc("/schema/{db}/{measurement}", server.ParquetServer.handleSchemaRequest).Methods("GET")
 
 	// Create a new mux that combines both standard handlers and the router
