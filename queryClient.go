@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -756,28 +757,35 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 		return fmt.Errorf("failed to get column types: %v", err)
 	}
 
-	// Create a map to hold our row data
-	rowTemplate := make(map[string]interface{})
+	// Create a struct type dynamically
+	fields := make([]reflect.StructField, len(columns))
 	for i, col := range columns {
-		// Initialize with zero values based on SQL type
-		switch types[i].DatabaseTypeName() {
+		sqlType := types[i].DatabaseTypeName()
+		var fieldType reflect.Type
+		switch sqlType {
 		case "BIGINT", "TIMESTAMP":
-			rowTemplate[col] = int64(0)
+			fieldType = reflect.TypeOf(int64(0))
 		case "INTEGER":
-			rowTemplate[col] = int32(0)
+			fieldType = reflect.TypeOf(int32(0))
 		case "BOOLEAN":
-			rowTemplate[col] = false
+			fieldType = reflect.TypeOf(false)
 		case "REAL":
-			rowTemplate[col] = float32(0)
+			fieldType = reflect.TypeOf(float32(0))
 		case "DOUBLE":
-			rowTemplate[col] = float64(0)
+			fieldType = reflect.TypeOf(float64(0))
 		default:
-			rowTemplate[col] = ""
+			fieldType = reflect.TypeOf("")
+		}
+		fields[i] = reflect.StructField{
+			Name: strings.Title(col), // Ensure field name is exported
+			Type: fieldType,
+			Tag:  reflect.StructTag(fmt.Sprintf(`parquet:"%s"`, col)),
 		}
 	}
+	rowType := reflect.StructOf(fields)
 
-	// Create writer with schema derived from our template
-	writer := parquet.NewWriter(w, parquet.SchemaOf(rowTemplate))
+	// Create writer with schema derived from our dynamic struct
+	writer := parquet.NewWriter(w, parquet.SchemaOf(reflect.New(rowType).Interface()))
 	defer writer.Close()
 
 	// Prepare value holders for scanning
@@ -793,15 +801,15 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 			return fmt.Errorf("failed to scan row: %v", err)
 		}
 
-		// Create a row with proper types
-		row := make(map[string]interface{})
+		// Create a new struct instance
+		rowValue := reflect.New(rowType).Elem()
 		for i, v := range values {
 			if v != nil {
-				row[columns[i]] = v
+				rowValue.Field(i).Set(reflect.ValueOf(v))
 			}
 		}
 
-		if err := writer.Write(row); err != nil {
+		if err := writer.Write(rowValue.Interface()); err != nil {
 			return fmt.Errorf("failed to write row: %v", err)
 		}
 	}
