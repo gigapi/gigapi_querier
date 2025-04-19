@@ -118,13 +118,6 @@ func (s *ParquetServer) handleArrowRequest(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *ParquetServer) buildVirtualParquetQuery(dbName, measurement string, timeRange TimeRange, filters map[string]string) string {
-	// Use the existing QueryClient functionality
-	parsed := &ParsedQuery{
-		DbName:      dbName,
-		Measurement: measurement,
-		TimeRange:   timeRange,
-	}
-
 	// Find relevant files
 	files, err := s.queryClient.FindRelevantFiles(dbName, measurement, timeRange)
 	if err != nil {
