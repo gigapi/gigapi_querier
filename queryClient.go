@@ -726,6 +726,20 @@ func DefaultStreamConfig() StreamConfig {
 	}
 }
 
+// Record represents a row in our data
+type Record struct {
+	Time      int64  `parquet:"time"`
+	Method    string `parquet:"method"`
+	CallID    string `parquet:"call_id"`
+	FromUser  string `parquet:"from_user"`
+	ToUser    string `parquet:"to_user"`
+	FromHost  string `parquet:"from_host"`
+	ToHost    string `parquet:"to_host"`
+	Protocol  string `parquet:"protocol"`
+	Family    string `parquet:"family"`
+	Transport string `parquet:"transport"`
+}
+
 // StreamParquetResultsWithConfig executes a query and streams results
 func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.Writer, config StreamConfig) error {
 	stmt, err := c.DB.Prepare(query)
@@ -747,7 +761,7 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 	}
 
 	// Create writer with schema
-	writer := parquet.NewWriter(w, parquet.SchemaOf(new(map[string]interface{})))
+	writer := parquet.NewWriter(w, parquet.SchemaOf(new(Record)))
 	defer writer.Close()
 
 	// Prepare value holders
@@ -763,12 +777,53 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 			return fmt.Errorf("failed to scan row: %v", err)
 		}
 
-		row := make(map[string]interface{})
+		record := &Record{}
 		for i, col := range columns {
-			row[col] = values[i]
+			switch col {
+			case "time":
+				if v, ok := values[i].(int64); ok {
+					record.Time = v
+				}
+			case "method":
+				if v, ok := values[i].(string); ok {
+					record.Method = v
+				}
+			case "call_id":
+				if v, ok := values[i].(string); ok {
+					record.CallID = v
+				}
+			case "from_user":
+				if v, ok := values[i].(string); ok {
+					record.FromUser = v
+				}
+			case "to_user":
+				if v, ok := values[i].(string); ok {
+					record.ToUser = v
+				}
+			case "from_host":
+				if v, ok := values[i].(string); ok {
+					record.FromHost = v
+				}
+			case "to_host":
+				if v, ok := values[i].(string); ok {
+					record.ToHost = v
+				}
+			case "protocol":
+				if v, ok := values[i].(string); ok {
+					record.Protocol = v
+				}
+			case "family":
+				if v, ok := values[i].(string); ok {
+					record.Family = v
+				}
+			case "transport":
+				if v, ok := values[i].(string); ok {
+					record.Transport = v
+				}
+			}
 		}
 
-		if err := writer.Write(row); err != nil {
+		if err := writer.Write(record); err != nil {
 			return fmt.Errorf("failed to write row: %v", err)
 		}
 	}
