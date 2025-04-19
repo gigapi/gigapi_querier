@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -741,14 +740,26 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 	}
 
 	// Open first file to get schema
-	f, err := parquet.OpenFile(files[0])
+	file, err := os.Open(files[0])
+	if err != nil {
+		return fmt.Errorf("failed to open parquet file: %v", err)
+	}
+	defer file.Close()
+
+	// Get file info for size
+	stat, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to get file info: %v", err)
+	}
+
+	// Read parquet file
+	pf, err := parquet.OpenFile(file, stat.Size())
 	if err != nil {
 		return fmt.Errorf("failed to open parquet file for schema: %v", err)
 	}
-	defer f.Close()
 
 	// Create writer using the same schema
-	writer := parquet.NewWriter(w, f.Schema())
+	writer := parquet.NewWriter(w, pf.Schema())
 	defer writer.Close()
 
 	// Execute query
