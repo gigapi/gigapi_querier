@@ -224,16 +224,11 @@ func parseTimeWithFormats(timeStr string) (time.Time, error) {
 func (s *ParquetServer) parseStreamConfig(params map[string][]string) StreamConfig {
 	config := DefaultStreamConfig()
 
-	// Parse row group size
-	if rgSize, ok := params["row_group_size"]; ok && len(rgSize) > 0 {
-		if size, err := strconv.Atoi(rgSize[0]); err == nil {
-			config.RowGroupSize = size
+	// Parse chunk size
+	if chunkSize, ok := params["chunk_size"]; ok && len(chunkSize) > 0 {
+		if size, err := strconv.Atoi(chunkSize[0]); err == nil {
+			config.ChunkSize = size
 		}
-	}
-
-	// Parse compression type
-	if compression, ok := params["compression"]; ok && len(compression) > 0 {
-		config.CompressionType = strings.ToUpper(compression[0])
 	}
 
 	return config
