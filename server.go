@@ -10,11 +10,14 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/gorilla/mux"
 )
 
 // Server represents the API server
 type Server struct {
-	QueryClient *QueryClient
+	QueryClient   *QueryClient
+	ParquetServer *ParquetServer
 }
 
 // NewServer creates a new server instance
@@ -25,8 +28,16 @@ func NewServer(dataDir string) (*Server, error) {
 		return nil, err
 	}
 
+	// Initialize ParquetServer
+	parquetServer, err := NewParquetServer(dataDir)
+	if err != nil {
+		client.Close()
+		return nil, err
+	}
+
 	return &Server{
-		QueryClient: client,
+		QueryClient:   client,
+		ParquetServer: parquetServer,
 	}, nil
 }
 
@@ -144,7 +155,13 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // Close the server and release resources
 func (s *Server) Close() error {
-	return s.QueryClient.Close()
+	if err := s.QueryClient.Close(); err != nil {
+		return err
+	}
+	if s.ParquetServer != nil && s.ParquetServer.queryClient != nil {
+		return s.ParquetServer.queryClient.Close()
+	}
+	return nil
 }
 
 func main() {
@@ -200,7 +217,19 @@ func main() {
 	http.HandleFunc("/health", server.handleHealth)
 	http.HandleFunc("/query", server.handleQuery)
 
-	// Start server
+	// Set up parquet routes
+	router := mux.NewRouter()
+	router.HandleFunc("/parquet/{db}/{measurement}", server.ParquetServer.handleParquetRequest).Methods("GET")
+	router.HandleFunc("/schema/{db}/{measurement}", server.ParquetServer.handleSchemaRequest).Methods("GET")
+
+	// Create a new mux that combines both standard handlers and the router
+	mux := http.NewServeMux()
+	mux.Handle("/parquet/", router)
+	mux.Handle("/schema/", router)
+	mux.HandleFunc("/health", server.handleHealth)
+	mux.HandleFunc("/query", server.handleQuery)
+
+	// Start server with combined mux
 	log.Printf("GigAPI server running at http://localhost:%s", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	log.Fatal(http.ListenAndServe(":"+port, mux))
 }
