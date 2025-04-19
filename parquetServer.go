@@ -130,14 +130,16 @@ func (s *ParquetServer) buildVirtualParquetQuery(dbName, measurement string, tim
 	// Build WHERE conditions
 	var conditions []string
 
-	// Add time range conditions
+	// Add time range conditions - convert to microseconds
 	if timeRange.Start != nil {
-		startTime := time.Unix(0, *timeRange.Start).UTC()
-		conditions = append(conditions, fmt.Sprintf("time >= '%s'", startTime.Format(time.RFC3339Nano)))
+		startTime := time.Unix(0, *timeRange.Start)
+		startMicros := startTime.UnixMicro()
+		conditions = append(conditions, fmt.Sprintf("time >= %d", startMicros))
 	}
 	if timeRange.End != nil {
-		endTime := time.Unix(0, *timeRange.End).UTC()
-		conditions = append(conditions, fmt.Sprintf("time <= '%s'", endTime.Format(time.RFC3339Nano)))
+		endTime := time.Unix(0, *timeRange.End)
+		endMicros := endTime.UnixMicro()
+		conditions = append(conditions, fmt.Sprintf("time <= %d", endMicros))
 	}
 
 	// Add other filters
@@ -166,6 +168,7 @@ func (s *ParquetServer) buildVirtualParquetQuery(dbName, measurement string, tim
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
 
+	log.Printf("Built query with time conditions: %v", conditions)
 	return query
 }
 

@@ -748,14 +748,6 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 		return fmt.Errorf("no relevant files found")
 	}
 
-	// Create a named pipe for DuckDB to write to
-	pipeName := filepath.Join(os.TempDir(), fmt.Sprintf("duckdb_pipe_%d", time.Now().UnixNano()))
-	err = syscall.Mkfifo(pipeName, 0666)
-	if err != nil {
-		return fmt.Errorf("failed to create pipe: %v", err)
-	}
-	defer os.Remove(pipeName)
-
 	// Build file list for DuckDB
 	var filesList strings.Builder
 	for i, file := range files {
@@ -772,51 +764,45 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 		fmt.Sprintf("FROM read_parquet([%s], union_by_name=true)", filesList.String()),
 	)
 
-	// Create a channel to signal completion
-	done := make(chan error)
-
-	// Start a goroutine to read from the pipe and write to the response
-	go func() {
-		pipeFile, err := os.OpenFile(pipeName, os.O_RDONLY, os.ModeNamedPipe)
-		if err != nil {
-			done <- fmt.Errorf("failed to open pipe for reading: %v", err)
-			return
-		}
-		defer pipeFile.Close()
-
-		// Copy data from pipe to response writer in chunks
-		_, err = io.Copy(w, pipeFile)
-		done <- err
-	}()
-
-	// Execute DuckDB query to write to the pipe
-	streamQuery := fmt.Sprintf(
-		"COPY (%s) TO '%s' (FORMAT PARQUET, ROW_GROUP_SIZE %d, COMPRESSION %s)", 
-		modifiedQuery, 
-		pipeName,
-		config.RowGroupSize,
-		config.CompressionType,
-	)
-	
-	// Execute in a separate connection to avoid blocking
-	streamDb, err := sql.Open("duckdb", "?access_mode=READ_WRITE")
+	// Create a new connection for this operation
+	conn, err := sql.Open("duckdb", ":memory:")
 	if err != nil {
 		return fmt.Errorf("failed to create streaming connection: %v", err)
 	}
-	defer streamDb.Close()
+	defer conn.Close()
 
-	// Execute the query
-	_, err = streamDb.Exec(streamQuery)
+	// Execute the query and stream directly to parquet format
+	streamQuery := fmt.Sprintf("COPY (%s) TO '|' (FORMAT PARQUET, ROW_GROUP_SIZE %d, COMPRESSION %s)",
+		modifiedQuery,
+		config.RowGroupSize,
+		config.CompressionType,
+	)
+
+	// Use DuckDB's stdout streaming capability
+	stmt, err := conn.Prepare(streamQuery)
+	if err != nil {
+		return fmt.Errorf("failed to prepare streaming query: %v", err)
+	}
+	defer stmt.Close()
+
+	rows, err := stmt.Query()
 	if err != nil {
 		return fmt.Errorf("failed to execute streaming query: %v", err)
 	}
+	defer rows.Close()
 
-	// Wait for the copying to complete
-	if err := <-done; err != nil {
-		return fmt.Errorf("failed to stream data: %v", err)
+	// Copy the data directly to the writer
+	var buf []byte
+	for rows.Next() {
+		if err := rows.Scan(&buf); err != nil {
+			return fmt.Errorf("failed to scan row: %v", err)
+		}
+		if _, err := w.Write(buf); err != nil {
+			return fmt.Errorf("failed to write data: %v", err)
+		}
 	}
 
-	return nil
+	return rows.Err()
 }
 
 // Close releases resources
