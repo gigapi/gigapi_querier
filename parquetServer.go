@@ -33,14 +33,14 @@ func NewParquetServer(dataDir string) (*ParquetServer, error) {
 func (s *ParquetServer) Start(port int) error {
 	r := mux.NewRouter()
 
-	// Route for accessing virtual parquet files - handle both GET and HEAD
-	r.HandleFunc("/parquet/{db}/{measurement}", s.handleParquetRequest).Methods("GET", "HEAD")
+	// Route for accessing Arrow streaming - handle both GET and HEAD
+	r.HandleFunc("/arrow/{db}/{measurement}", s.handleArrowRequest).Methods("GET", "HEAD")
 	
 	// Route for getting schema information
 	r.HandleFunc("/schema/{db}/{measurement}", s.handleSchemaRequest).Methods("GET")
 
 	addr := fmt.Sprintf(":%d", port)
-	fmt.Printf("Starting Parquet Server on %s\n", addr)
+	fmt.Printf("Starting Arrow Server on %s\n", addr)
 	return http.ListenAndServe(addr, r)
 }
 
@@ -68,13 +68,13 @@ func (s *ParquetServer) handleSchemaRequest(w http.ResponseWriter, r *http.Reque
 	json.NewEncoder(w).Encode(schema)
 }
 
-func (s *ParquetServer) handleParquetRequest(w http.ResponseWriter, r *http.Request) {
+func (s *ParquetServer) handleArrowRequest(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	dbName := vars["db"]
 	measurement := vars["measurement"]
 
 	// Log incoming request
-	log.Printf("Parquet request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
+	log.Printf("Arrow request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
 
 	// Parse query parameters for filtering
 	timeRange := s.parseTimeRange(r.URL.Query())

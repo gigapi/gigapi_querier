@@ -15,7 +15,6 @@ import (
 	"time"
 
 	_ "github.com/marcboeker/go-duckdb/v2"
-	"github.com/parquet-go/parquet"
 )
 
 var db *sql.DB
@@ -716,19 +715,15 @@ func (c *QueryClient) Query(query, dbName string) ([]map[string]interface{}, err
 	return result, nil
 }
 
-// StreamConfig holds configuration for parquet streaming
+// Remove StreamConfig fields specific to Parquet
 type StreamConfig struct {
-	RowGroupSize    int    // Number of rows per row group
-	CompressionType string // Parquet compression type (SNAPPY, GZIP, ZSTD, etc.)
-	ChunkSize       int    // Size of chunks when copying data
+	ChunkSize int // Size of chunks when copying data
 }
 
-// DefaultStreamConfig returns default streaming configuration
+// Update DefaultStreamConfig
 func DefaultStreamConfig() StreamConfig {
 	return StreamConfig{
-		RowGroupSize:    100000,
-		CompressionType: "SNAPPY",
-		ChunkSize:       1024 * 1024, // 1MB chunks
+		ChunkSize: 1024 * 1024, // 1MB chunks
 	}
 }
 

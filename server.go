@@ -217,14 +217,14 @@ func main() {
 	http.HandleFunc("/health", server.handleHealth)
 	http.HandleFunc("/query", server.handleQuery)
 
-	// Set up parquet routes
+	// Set up Arrow routes
 	router := mux.NewRouter()
-	router.HandleFunc("/parquet/{db}/{measurement}", server.ParquetServer.handleParquetRequest).Methods("GET", "HEAD")
+	router.HandleFunc("/arrow/{db}/{measurement}", server.ParquetServer.handleArrowRequest).Methods("GET", "HEAD")
 	router.HandleFunc("/schema/{db}/{measurement}", server.ParquetServer.handleSchemaRequest).Methods("GET")
 
 	// Create a new mux that combines both standard handlers and the router
 	mux := http.NewServeMux()
-	mux.Handle("/parquet/", router)
+	mux.Handle("/arrow/", router)
 	mux.Handle("/schema/", router)
 	mux.HandleFunc("/health", server.handleHealth)
 	mux.HandleFunc("/query", server.handleQuery)
