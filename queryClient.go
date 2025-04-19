@@ -739,8 +739,8 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 		return fmt.Errorf("failed to parse query: %v", err)
 	}
 
-	// Get schema from one of our parquet files using the correct measurement
-	files, err := c.FindRelevantFiles(parsed.DbName, parsed.Measurement, TimeRange{})
+	// Get files using the same parameters as the query
+	files, err := c.FindRelevantFiles(parsed.DbName, parsed.Measurement, parsed.TimeRange)
 	if err != nil || len(files) == 0 {
 		return fmt.Errorf("no files found to read schema from")
 	}
