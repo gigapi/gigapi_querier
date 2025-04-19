@@ -213,23 +213,16 @@ func main() {
 	}
 	defer server.Close()
 
-	// Set up routes
-	http.HandleFunc("/health", server.handleHealth)
-	http.HandleFunc("/query", server.handleQuery)
-
-	// Set up Arrow routes
+	// Create router
 	router := mux.NewRouter()
+
+	// Add routes
+	router.HandleFunc("/health", server.handleHealth)
+	router.HandleFunc("/query", server.handleQuery)
 	router.HandleFunc("/arrow/{db}/{measurement}", server.ParquetServer.handleArrowRequest).Methods("GET", "HEAD")
 	router.HandleFunc("/schema/{db}/{measurement}", server.ParquetServer.handleSchemaRequest).Methods("GET")
 
-	// Create a new mux that combines both standard handlers and the router
-	mux := http.NewServeMux()
-	mux.Handle("/arrow/", router)
-	mux.Handle("/schema/", router)
-	mux.HandleFunc("/health", server.handleHealth)
-	mux.HandleFunc("/query", server.handleQuery)
-
-	// Start server with combined mux
+	// Start server with the router
 	log.Printf("GigAPI server running at http://localhost:%s", port)
-	log.Fatal(http.ListenAndServe(":"+port, mux))
+	log.Fatal(http.ListenAndServe(":"+port, router))
 }
