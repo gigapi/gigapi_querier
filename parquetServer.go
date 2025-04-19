@@ -96,21 +96,15 @@ func (s *ParquetServer) handleParquetRequest(w http.ResponseWriter, r *http.Requ
 
 	log.Printf("Found %d files for request", len(files))
 
-	// Set common headers
-	w.Header().Set("Content-Type", "application/vnd.apache.parquet")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s_%s.parquet", 
-		measurement, time.Now().Format("20060102150405")))
+	// Set headers for Arrow streaming
+	w.Header().Set("Content-Type", "application/x-arrow")
 	
-	// Add headers that DuckDB expects
-	w.Header().Set("Accept-Ranges", "bytes")
-	w.Header().Set("Content-Length", "1048576") // Use a reasonable default
-
 	// For HEAD requests, we're done
 	if r.Method == "HEAD" {
 		return
 	}
 
-	// For GET requests, continue with streaming the data
+	// Build and execute query
 	config := s.parseStreamConfig(r.URL.Query())
 	query := s.buildVirtualParquetQuery(dbName, measurement, timeRange, filters)
 

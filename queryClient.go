@@ -734,29 +734,52 @@ func DefaultStreamConfig() StreamConfig {
 
 // StreamParquetResultsWithConfig executes a query and streams results with custom config
 func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.Writer, config StreamConfig) error {
-	// Create temporary file
-	tmpFile, err := os.CreateTemp("", "*.parquet")
-	if err != nil {
-		return fmt.Errorf("failed to create temp file: %v", err)
-	}
-	tmpFile.Close()
-	defer os.Remove(tmpFile.Name())
-
-	// Execute query directly to parquet file
-	_, err = c.DB.Exec(fmt.Sprintf("COPY (%s) TO '%s' (FORMAT PARQUET)", query, tmpFile.Name()))
-	if err != nil {
-		return fmt.Errorf("failed to execute query: %v", err)
+	// First, load the Arrow extension if not already loaded
+	if _, err := c.DB.Exec("INSTALL arrow; LOAD arrow;"); err != nil {
+		return fmt.Errorf("failed to load arrow extension: %v", err)
 	}
 
-	// Stream the file to the response
-	file, err := os.Open(tmpFile.Name())
-	if err != nil {
-		return fmt.Errorf("failed to open temp file: %v", err)
-	}
-	defer file.Close()
+	// Execute query directly to Arrow format
+	streamQuery := fmt.Sprintf("COPY (%s) TO '|' (FORMAT ARROW)", query)
+	
+	log.Printf("Executing arrow stream query: %s", streamQuery)
 
-	_, err = io.Copy(w, file)
-	return err
+	// Use a transaction to ensure consistency
+	tx, err := c.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	// Prepare and execute the streaming query
+	stmt, err := tx.Prepare(streamQuery)
+	if err != nil {
+		return fmt.Errorf("failed to prepare streaming query: %v", err)
+	}
+	defer stmt.Close()
+
+	rows, err := stmt.Query()
+	if err != nil {
+		return fmt.Errorf("failed to execute streaming query: %v", err)
+	}
+	defer rows.Close()
+
+	// Stream the Arrow data
+	var buf []byte
+	for rows.Next() {
+		if err := rows.Scan(&buf); err != nil {
+			return fmt.Errorf("failed to scan row: %v", err)
+		}
+		if _, err := w.Write(buf); err != nil {
+			return fmt.Errorf("failed to write data: %v", err)
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error during row iteration: %v", err)
+	}
+
+	return tx.Commit()
 }
 
 // Close releases resources
