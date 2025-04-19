@@ -14,6 +14,7 @@ import (
 	"time"
 
 	_ "github.com/marcboeker/go-duckdb/v2"
+	"github.com/parquet-go/parquet-go"
 )
 
 var db *sql.DB
@@ -714,58 +715,81 @@ func (c *QueryClient) Query(query, dbName string) ([]map[string]interface{}, err
 	return result, nil
 }
 
-// Remove StreamConfig fields specific to Parquet
+// StreamConfig holds configuration for streaming
 type StreamConfig struct {
 	ChunkSize int // Size of chunks when copying data
 }
 
-// Update DefaultStreamConfig
+// DefaultStreamConfig returns default streaming configuration
 func DefaultStreamConfig() StreamConfig {
 	return StreamConfig{
 		ChunkSize: 1024 * 1024, // 1MB chunks
 	}
 }
 
-// StreamParquetResultsWithConfig executes a query and streams results with custom config
+// StreamParquetResultsWithConfig executes a query and streams results
 func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.Writer, config StreamConfig) error {
-	// First, load the Arrow extension if not already loaded
-	if _, err := c.DB.Exec("INSTALL arrow; LOAD arrow;"); err != nil {
-		return fmt.Errorf("failed to load arrow extension: %v", err)
-	}
-
-	// Execute query directly to Arrow format
-	streamQuery := fmt.Sprintf("COPY (%s) TO '|' (FORMAT ARROW)", query)
-	
-	log.Printf("Executing arrow stream query: %s", streamQuery)
-
-	// Use a transaction to ensure consistency
-	tx, err := c.DB.Begin()
+	// Execute query and stream results
+	stmt, err := c.DB.Prepare(query)
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %v", err)
-	}
-	defer tx.Rollback()
-
-	// Prepare and execute the streaming query
-	stmt, err := tx.Prepare(streamQuery)
-	if err != nil {
-		return fmt.Errorf("failed to prepare streaming query: %v", err)
+		return fmt.Errorf("failed to prepare query: %v", err)
 	}
 	defer stmt.Close()
 
 	rows, err := stmt.Query()
 	if err != nil {
-		return fmt.Errorf("failed to execute streaming query: %v", err)
+		return fmt.Errorf("failed to execute query: %v", err)
 	}
 	defer rows.Close()
 
-	// Stream the Arrow data
-	var buf []byte
+	// Get column information
+	columns, err := rows.Columns()
+	if err != nil {
+		return fmt.Errorf("failed to get columns: %v", err)
+	}
+
+	columnTypes, err := rows.ColumnTypes()
+	if err != nil {
+		return fmt.Errorf("failed to get column types: %v", err)
+	}
+
+	// Create Parquet schema from SQL types
+	fields := make([]parquet.Field, len(columns))
+	for i, col := range columnTypes {
+		sqlType := col.DatabaseTypeName()
+		fields[i] = parquet.Field{
+			Name:       columns[i],
+			RepetitionType: parquet.Required,
+			Node:       sqlTypeToParquet(sqlType),
+		}
+	}
+
+	schema := parquet.NewSchema("record", fields...)
+
+	// Create Parquet writer
+	writer := parquet.NewWriter(w, schema)
+	defer writer.Close()
+
+	// Prepare value holders
+	values := make([]interface{}, len(columns))
+	valuePtrs := make([]interface{}, len(columns))
+	for i := range values {
+		valuePtrs[i] = &values[i]
+	}
+
+	// Stream rows to Parquet format
 	for rows.Next() {
-		if err := rows.Scan(&buf); err != nil {
+		if err := rows.Scan(valuePtrs...); err != nil {
 			return fmt.Errorf("failed to scan row: %v", err)
 		}
-		if _, err := w.Write(buf); err != nil {
-			return fmt.Errorf("failed to write data: %v", err)
+
+		row := make(map[string]interface{})
+		for i, col := range columns {
+			row[col] = values[i]
+		}
+
+		if err := writer.Write(row); err != nil {
+			return fmt.Errorf("failed to write row: %v", err)
 		}
 	}
 
@@ -773,7 +797,31 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 		return fmt.Errorf("error during row iteration: %v", err)
 	}
 
-	return tx.Commit()
+	return nil
+}
+
+// sqlTypeToParquet converts SQL types to Parquet types
+func sqlTypeToParquet(sqlType string) parquet.Node {
+	switch sqlType {
+	case "BIGINT":
+		return parquet.Int(64)
+	case "INTEGER":
+		return parquet.Int(32)
+	case "SMALLINT":
+		return parquet.Int(16)
+	case "BOOLEAN":
+		return parquet.Boolean()
+	case "REAL":
+		return parquet.Float(32)
+	case "DOUBLE":
+		return parquet.Float(64)
+	case "VARCHAR", "TEXT":
+		return parquet.String()
+	case "TIMESTAMP":
+		return parquet.Int(64) // Store as microseconds since epoch
+	default:
+		return parquet.String() // Default to string for unknown types
+	}
 }
 
 // Close releases resources
