@@ -764,13 +764,6 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 		fmt.Sprintf("FROM read_parquet([%s], union_by_name=true)", filesList.String()),
 	)
 
-	// Create a new connection for this operation
-	conn, err := sql.Open("duckdb", ":memory:")
-	if err != nil {
-		return fmt.Errorf("failed to create streaming connection: %v", err)
-	}
-	defer conn.Close()
-
 	// Execute the query and stream directly to parquet format
 	streamQuery := fmt.Sprintf("COPY (%s) TO '|' (FORMAT PARQUET, ROW_GROUP_SIZE %d, COMPRESSION %s)",
 		modifiedQuery,
@@ -778,8 +771,8 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 		config.CompressionType,
 	)
 
-	// Use DuckDB's stdout streaming capability
-	stmt, err := conn.Prepare(streamQuery)
+	// Use DuckDB's stdout streaming capability with existing connection
+	stmt, err := c.DB.Prepare(streamQuery)
 	if err != nil {
 		return fmt.Errorf("failed to prepare streaming query: %v", err)
 	}
