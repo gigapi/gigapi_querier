@@ -734,6 +734,24 @@ type DynamicRow struct {
 
 // StreamParquetResultsWithConfig executes a query and streams results
 func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.Writer, config StreamConfig) error {
+	// First get schema from one of our parquet files
+	files, err := c.FindRelevantFiles(dbName, "", TimeRange{})
+	if err != nil || len(files) == 0 {
+		return fmt.Errorf("no files found to read schema from")
+	}
+
+	// Open first file to get schema
+	f, err := parquet.OpenFile(files[0])
+	if err != nil {
+		return fmt.Errorf("failed to open parquet file for schema: %v", err)
+	}
+	defer f.Close()
+
+	// Create writer using the same schema
+	writer := parquet.NewWriter(w, f.Schema())
+	defer writer.Close()
+
+	// Execute query
 	stmt, err := c.DB.Prepare(query)
 	if err != nil {
 		return fmt.Errorf("failed to prepare query: %v", err)
@@ -746,47 +764,11 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 	}
 	defer rows.Close()
 
-	// Get column information and types
+	// Get column information
 	columns, err := rows.Columns()
 	if err != nil {
 		return fmt.Errorf("failed to get columns: %v", err)
 	}
-
-	types, err := rows.ColumnTypes()
-	if err != nil {
-		return fmt.Errorf("failed to get column types: %v", err)
-	}
-
-	// Create a struct type dynamically
-	fields := make([]reflect.StructField, len(columns))
-	for i, col := range columns {
-		sqlType := types[i].DatabaseTypeName()
-		var fieldType reflect.Type
-		switch sqlType {
-		case "BIGINT", "TIMESTAMP":
-			fieldType = reflect.TypeOf(int64(0))
-		case "INTEGER":
-			fieldType = reflect.TypeOf(int32(0))
-		case "BOOLEAN":
-			fieldType = reflect.TypeOf(false)
-		case "REAL":
-			fieldType = reflect.TypeOf(float32(0))
-		case "DOUBLE":
-			fieldType = reflect.TypeOf(float64(0))
-		default:
-			fieldType = reflect.TypeOf("")
-		}
-		fields[i] = reflect.StructField{
-			Name: strings.Title(col), // Ensure field name is exported
-			Type: fieldType,
-			Tag:  reflect.StructTag(fmt.Sprintf(`parquet:"%s"`, col)),
-		}
-	}
-	rowType := reflect.StructOf(fields)
-
-	// Create writer with schema derived from our dynamic struct
-	writer := parquet.NewWriter(w, parquet.SchemaOf(reflect.New(rowType).Interface()))
-	defer writer.Close()
 
 	// Prepare value holders for scanning
 	values := make([]interface{}, len(columns))
@@ -801,15 +783,15 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 			return fmt.Errorf("failed to scan row: %v", err)
 		}
 
-		// Create a new struct instance
-		rowValue := reflect.New(rowType).Elem()
-		for i, v := range values {
-			if v != nil {
-				rowValue.Field(i).Set(reflect.ValueOf(v))
+		// Create a row with proper types
+		row := make(map[string]interface{})
+		for i, col := range columns {
+			if values[i] != nil {
+				row[col] = values[i]
 			}
 		}
 
-		if err := writer.Write(rowValue.Interface()); err != nil {
+		if err := writer.Write(row); err != nil {
 			return fmt.Errorf("failed to write row: %v", err)
 		}
 	}
