@@ -726,6 +726,11 @@ func DefaultStreamConfig() StreamConfig {
 	}
 }
 
+// DynamicRow represents a dynamic row structure
+type DynamicRow struct {
+	Values map[string]interface{}
+}
+
 // StreamParquetResultsWithConfig executes a query and streams results
 func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.Writer, config StreamConfig) error {
 	stmt, err := c.DB.Prepare(query)
@@ -751,28 +756,30 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 		return fmt.Errorf("failed to get column types: %v", err)
 	}
 
-	// Create a map to hold our row data
-	rowTemplate := make(map[string]interface{})
+	// Create schema definition
+	schema := parquet.NewSchema("DynamicRow")
 	for i, col := range columns {
-		// Initialize with zero values based on SQL type
-		switch types[i].DatabaseTypeName() {
+		sqlType := types[i].DatabaseTypeName()
+		var pqType parquet.Node
+		switch sqlType {
 		case "BIGINT", "TIMESTAMP":
-			rowTemplate[col] = int64(0)
+			pqType = parquet.Int(64)
 		case "INTEGER":
-			rowTemplate[col] = int32(0)
+			pqType = parquet.Int(32)
 		case "BOOLEAN":
-			rowTemplate[col] = false
+			pqType = parquet.Boolean()
 		case "REAL":
-			rowTemplate[col] = float32(0)
+			pqType = parquet.Float(32)
 		case "DOUBLE":
-			rowTemplate[col] = float64(0)
+			pqType = parquet.Float(64)
 		default:
-			rowTemplate[col] = ""
+			pqType = parquet.String()
 		}
+		schema.AddField(col, pqType)
 	}
 
-	// Create writer with schema derived from our template
-	writer := parquet.NewWriter(w, parquet.SchemaOf(rowTemplate))
+	// Create writer
+	writer := parquet.NewWriter(w, schema)
 	defer writer.Close()
 
 	// Prepare value holders for scanning
@@ -793,9 +800,6 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 		for i, v := range values {
 			if v != nil {
 				row[columns[i]] = v
-			} else {
-				// Use zero value from template for nulls
-				row[columns[i]] = rowTemplate[columns[i]]
 			}
 		}
 
