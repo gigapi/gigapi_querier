@@ -747,23 +747,9 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 		return fmt.Errorf("failed to get columns: %v", err)
 	}
 
-	columnTypes, err := rows.ColumnTypes()
-	if err != nil {
-		return fmt.Errorf("failed to get column types: %v", err)
-	}
-
-	// Create schema
+	// Create schema and writer
 	schema := parquet.SchemaOf(new(map[string]interface{}))
-
-	// Create writer options
-	opts := []parquet.WriterOption{
-		parquet.WithCompressionCodec(parquet.Snappy),
-		parquet.WithCreator("GigAPI"),
-		parquet.WithBufferSize(config.ChunkSize),
-	}
-
-	// Create writer
-	writer := parquet.NewWriter(w, schema, opts...)
+	writer := parquet.NewWriter(w)
 	defer writer.Close()
 
 	// Prepare value holders
