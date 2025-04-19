@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	_ "github.com/marcboeker/go-duckdb/v2"
@@ -713,8 +714,24 @@ func (c *QueryClient) Query(query, dbName string) ([]map[string]interface{}, err
 	return result, nil
 }
 
-// StreamParquetResults executes a query and streams results in Parquet format
-func (c *QueryClient) StreamParquetResults(query, dbName string, w io.Writer) error {
+// StreamConfig holds configuration for parquet streaming
+type StreamConfig struct {
+	RowGroupSize    int    // Number of rows per row group
+	CompressionType string // Parquet compression type (SNAPPY, GZIP, ZSTD, etc.)
+	ChunkSize       int    // Size of chunks when copying data
+}
+
+// DefaultStreamConfig returns default streaming configuration
+func DefaultStreamConfig() StreamConfig {
+	return StreamConfig{
+		RowGroupSize:    100000,
+		CompressionType: "SNAPPY",
+		ChunkSize:       1024 * 1024, // 1MB chunks
+	}
+}
+
+// StreamParquetResultsWithConfig executes a query and streams results with custom config
+func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.Writer, config StreamConfig) error {
 	// Parse the query to find relevant files
 	parsed, err := c.ParseQuery(query, dbName)
 	if err != nil {
@@ -727,14 +744,79 @@ func (c *QueryClient) StreamParquetResults(query, dbName string, w io.Writer) er
 		return err
 	}
 
-	// Use DuckDB's arrow or parquet streaming capabilities to write directly to the response
-	// This avoids creating temporary files or loading everything into memory
-	streamQuery := fmt.Sprintf("COPY (%s) TO PARQUET_STREAM", query)
+	if len(files) == 0 {
+		return fmt.Errorf("no relevant files found")
+	}
+
+	// Create a named pipe for DuckDB to write to
+	pipeName := filepath.Join(os.TempDir(), fmt.Sprintf("duckdb_pipe_%d", time.Now().UnixNano()))
+	err = syscall.Mkfifo(pipeName, 0666)
+	if err != nil {
+		return fmt.Errorf("failed to create pipe: %v", err)
+	}
+	defer os.Remove(pipeName)
+
+	// Build file list for DuckDB
+	var filesList strings.Builder
+	for i, file := range files {
+		if i > 0 {
+			filesList.WriteString(", ")
+		}
+		filesList.WriteString(fmt.Sprintf("'%s'", file))
+	}
+
+	// Modify the query to use the specific files we found
+	fromPattern := regexp.MustCompile(`(?i)FROM\s+(?:\w+\.)?(\w+)`)
+	modifiedQuery := fromPattern.ReplaceAllString(
+		query,
+		fmt.Sprintf("FROM read_parquet([%s], union_by_name=true)", filesList.String()),
+	)
+
+	// Create a channel to signal completion
+	done := make(chan error)
+
+	// Start a goroutine to read from the pipe and write to the response
+	go func() {
+		pipeFile, err := os.OpenFile(pipeName, os.O_RDONLY, os.ModeNamedPipe)
+		if err != nil {
+			done <- fmt.Errorf("failed to open pipe for reading: %v", err)
+			return
+		}
+		defer pipeFile.Close()
+
+		// Copy data from pipe to response writer in chunks
+		_, err = io.Copy(w, pipeFile)
+		done <- err
+	}()
+
+	// Execute DuckDB query to write to the pipe
+	streamQuery := fmt.Sprintf(
+		"COPY (%s) TO '%s' (FORMAT PARQUET, ROW_GROUP_SIZE %d, COMPRESSION %s)", 
+		modifiedQuery, 
+		pipeName,
+		config.RowGroupSize,
+		config.CompressionType,
+	)
 	
-	// Execute query with streaming output
-	// Note: This is a placeholder - we need to implement the actual streaming logic
-	// using DuckDB's streaming capabilities
-	return c.DB.QueryRow(streamQuery).Scan(&w)
+	// Execute in a separate connection to avoid blocking
+	streamDb, err := sql.Open("duckdb", "?access_mode=READ_WRITE")
+	if err != nil {
+		return fmt.Errorf("failed to create streaming connection: %v", err)
+	}
+	defer streamDb.Close()
+
+	// Execute the query
+	_, err = streamDb.Exec(streamQuery)
+	if err != nil {
+		return fmt.Errorf("failed to execute streaming query: %v", err)
+	}
+
+	// Wait for the copying to complete
+	if err := <-done; err != nil {
+		return fmt.Errorf("failed to stream data: %v", err)
+	}
+
+	return nil
 }
 
 // Close releases resources

@@ -76,17 +76,19 @@ func (s *ParquetServer) handleParquetRequest(w http.ResponseWriter, r *http.Requ
 	timeRange := s.parseTimeRange(r.URL.Query())
 	filters := s.parseFilters(r.URL.Query())
 
-	// Build the query using our existing QueryClient format
+	// Parse streaming configuration from query parameters
+	config := s.parseStreamConfig(r.URL.Query())
+
+	// Build the query
 	query := s.buildVirtualParquetQuery(dbName, measurement, timeRange, filters)
 
-	// Set response headers for streaming parquet
+	// Set response headers
 	w.Header().Set("Content-Type", "application/vnd.apache.parquet")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s_%s.parquet", 
 		measurement, time.Now().Format("20060102150405")))
 
-	// Execute query with parquet output format
-	// Note: We'll need to modify QueryClient to support streaming parquet output
-	if err := s.queryClient.StreamParquetResults(query, dbName, w); err != nil {
+	// Stream results with configuration
+	if err := s.queryClient.StreamParquetResultsWithConfig(query, dbName, w, config); err != nil {
 		http.Error(w, fmt.Sprintf("Failed to stream results: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -140,7 +142,8 @@ func (s *ParquetServer) parseFilters(params map[string][]string) map[string]stri
 func (s *ParquetServer) parseTimeRange(params map[string][]string) TimeRange {
 	timeRange := TimeRange{}
 
-	if startStr := params.Get("start"); startStr != "" {
+	if startStrArr, ok := params["start"]; ok && len(startStrArr) > 0 {
+		startStr := startStrArr[0]
 		startTime, err := time.Parse(time.RFC3339Nano, startStr)
 		if err == nil {
 			startNanos := startTime.UnixNano()
@@ -148,7 +151,8 @@ func (s *ParquetServer) parseTimeRange(params map[string][]string) TimeRange {
 		}
 	}
 
-	if endStr := params.Get("end"); endStr != "" {
+	if endStrArr, ok := params["end"]; ok && len(endStrArr) > 0 {
+		endStr := endStrArr[0]
 		endTime, err := time.Parse(time.RFC3339Nano, endStr)
 		if err == nil {
 			endNanos := endTime.UnixNano()
@@ -157,4 +161,22 @@ func (s *ParquetServer) parseTimeRange(params map[string][]string) TimeRange {
 	}
 
 	return timeRange
+}
+
+func (s *ParquetServer) parseStreamConfig(params map[string][]string) StreamConfig {
+	config := DefaultStreamConfig()
+
+	// Parse row group size
+	if rgSize, ok := params["row_group_size"]; ok && len(rgSize) > 0 {
+		if size, err := strconv.Atoi(rgSize[0]); err == nil {
+			config.RowGroupSize = size
+		}
+	}
+
+	// Parse compression type
+	if compression, ok := params["compression"]; ok && len(compression) > 0 {
+		config.CompressionType = strings.ToUpper(compression[0])
+	}
+
+	return config
 } 
