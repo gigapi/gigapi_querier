@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -710,6 +711,30 @@ func (c *QueryClient) Query(query, dbName string) ([]map[string]interface{}, err
 	}
 
 	return result, nil
+}
+
+// StreamParquetResults executes a query and streams results in Parquet format
+func (c *QueryClient) StreamParquetResults(query, dbName string, w io.Writer) error {
+	// Parse the query to find relevant files
+	parsed, err := c.ParseQuery(query, dbName)
+	if err != nil {
+		return err
+	}
+
+	// Find relevant files
+	files, err := c.FindRelevantFiles(parsed.DbName, parsed.Measurement, parsed.TimeRange)
+	if err != nil {
+		return err
+	}
+
+	// Use DuckDB's arrow or parquet streaming capabilities to write directly to the response
+	// This avoids creating temporary files or loading everything into memory
+	streamQuery := fmt.Sprintf("COPY (%s) TO PARQUET_STREAM", query)
+	
+	// Execute query with streaming output
+	// Note: This is a placeholder - we need to implement the actual streaming logic
+	// using DuckDB's streaming capabilities
+	return c.DB.QueryRow(streamQuery).Scan(&w)
 }
 
 // Close releases resources
