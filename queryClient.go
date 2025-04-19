@@ -15,6 +15,8 @@ import (
 
 	_ "github.com/marcboeker/go-duckdb/v2"
 	"github.com/parquet-go/parquet-go"
+	"github.com/parquet-go/parquet-go/format"
+	"github.com/parquet-go/parquet-go/parquet"
 )
 
 var db *sql.DB
@@ -729,7 +731,6 @@ func DefaultStreamConfig() StreamConfig {
 
 // StreamParquetResultsWithConfig executes a query and streams results
 func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.Writer, config StreamConfig) error {
-	// Execute query and stream results
 	stmt, err := c.DB.Prepare(query)
 	if err != nil {
 		return fmt.Errorf("failed to prepare query: %v", err)
@@ -753,21 +754,27 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 		return fmt.Errorf("failed to get column types: %v", err)
 	}
 
-	// Create Parquet schema from SQL types
+	// Create schema
 	fields := make([]parquet.Field, len(columns))
 	for i, col := range columnTypes {
 		sqlType := col.DatabaseTypeName()
 		fields[i] = parquet.Field{
-			Name:       columns[i],
-			RepetitionType: parquet.Required,
-			Node:       sqlTypeToParquet(sqlType),
+			Name:     columns[i],
+			Type:     sqlTypeToParquetType(sqlType),
+			Optional: true,
 		}
 	}
 
 	schema := parquet.NewSchema("record", fields...)
 
-	// Create Parquet writer
-	writer := parquet.NewWriter(w, schema)
+	// Create writer options
+	opts := []parquet.WriterOption{
+		parquet.WriteBufferSize(config.ChunkSize),
+		parquet.WriteCompression(parquet.Snappy),
+	}
+
+	// Create writer
+	writer := parquet.NewWriter(w, schema, opts...)
 	defer writer.Close()
 
 	// Prepare value holders
@@ -777,7 +784,7 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 		valuePtrs[i] = &values[i]
 	}
 
-	// Stream rows to Parquet format
+	// Stream rows
 	for rows.Next() {
 		if err := rows.Scan(valuePtrs...); err != nil {
 			return fmt.Errorf("failed to scan row: %v", err)
@@ -797,30 +804,30 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 		return fmt.Errorf("error during row iteration: %v", err)
 	}
 
-	return nil
+	return writer.Close()
 }
 
-// sqlTypeToParquet converts SQL types to Parquet types
-func sqlTypeToParquet(sqlType string) parquet.Node {
+// sqlTypeToParquetType converts SQL types to Parquet types
+func sqlTypeToParquetType(sqlType string) parquet.Type {
 	switch sqlType {
 	case "BIGINT":
-		return parquet.Int(64)
+		return parquet.Int64Type
 	case "INTEGER":
-		return parquet.Int(32)
+		return parquet.Int32Type
 	case "SMALLINT":
-		return parquet.Int(16)
+		return parquet.Int16Type
 	case "BOOLEAN":
-		return parquet.Boolean()
+		return parquet.BooleanType
 	case "REAL":
-		return parquet.Float(32)
+		return parquet.FloatType
 	case "DOUBLE":
-		return parquet.Float(64)
+		return parquet.DoubleType
 	case "VARCHAR", "TEXT":
-		return parquet.String()
+		return parquet.StringType
 	case "TIMESTAMP":
-		return parquet.Int(64) // Store as microseconds since epoch
+		return parquet.Int64Type // Store as microseconds since epoch
 	default:
-		return parquet.String() // Default to string for unknown types
+		return parquet.StringType // Default to string for unknown types
 	}
 }
 
