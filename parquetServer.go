@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -72,16 +73,28 @@ func (s *ParquetServer) handleParquetRequest(w http.ResponseWriter, r *http.Requ
 	dbName := vars["db"]
 	measurement := vars["measurement"]
 
+	// Log incoming request
+	log.Printf("Parquet request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
+
 	// Parse query parameters for filtering
 	timeRange := s.parseTimeRange(r.URL.Query())
 	filters := s.parseFilters(r.URL.Query())
 
 	// Verify that we have data available
 	files, err := s.queryClient.FindRelevantFiles(dbName, measurement, timeRange)
-	if err != nil || len(files) == 0 {
+	if err != nil {
+		log.Printf("Error finding files: %v", err)
+		http.Error(w, fmt.Sprintf("Error finding files: %v", err), http.StatusInternalServerError)
+		return
+	}
+	
+	if len(files) == 0 {
+		log.Printf("No files found for db=%s measurement=%s timeRange=%+v", dbName, measurement, timeRange)
 		http.Error(w, "No data found", http.StatusNotFound)
 		return
 	}
+
+	log.Printf("Found %d files for request", len(files))
 
 	// Set common headers
 	w.Header().Set("Content-Type", "application/vnd.apache.parquet")
@@ -90,7 +103,6 @@ func (s *ParquetServer) handleParquetRequest(w http.ResponseWriter, r *http.Requ
 	
 	// Add headers that DuckDB expects
 	w.Header().Set("Accept-Ranges", "bytes")
-	// We don't know the exact size, but DuckDB needs a size header
 	w.Header().Set("Content-Length", "1048576") // Use a reasonable default
 
 	// For HEAD requests, we're done
@@ -102,7 +114,10 @@ func (s *ParquetServer) handleParquetRequest(w http.ResponseWriter, r *http.Requ
 	config := s.parseStreamConfig(r.URL.Query())
 	query := s.buildVirtualParquetQuery(dbName, measurement, timeRange, filters)
 
+	log.Printf("Executing query: %s", query)
+
 	if err := s.queryClient.StreamParquetResultsWithConfig(query, dbName, w, config); err != nil {
+		log.Printf("Error streaming results: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to stream results: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -117,21 +132,32 @@ func (s *ParquetServer) buildVirtualParquetQuery(dbName, measurement string, tim
 
 	// Add time range conditions
 	if timeRange.Start != nil {
-		startTime := time.Unix(0, *timeRange.Start).Format(time.RFC3339Nano)
-		conditions = append(conditions, fmt.Sprintf("time >= '%s'", startTime))
+		startTime := time.Unix(0, *timeRange.Start).UTC()
+		conditions = append(conditions, fmt.Sprintf("time >= '%s'", startTime.Format(time.RFC3339Nano)))
 	}
 	if timeRange.End != nil {
-		endTime := time.Unix(0, *timeRange.End).Format(time.RFC3339Nano)
-		conditions = append(conditions, fmt.Sprintf("time <= '%s'", endTime))
+		endTime := time.Unix(0, *timeRange.End).UTC()
+		conditions = append(conditions, fmt.Sprintf("time <= '%s'", endTime.Format(time.RFC3339Nano)))
 	}
 
 	// Add other filters
 	for col, val := range filters {
 		if col == "time" {
-			conditions = append(conditions, fmt.Sprintf("%s = '%s'", col, val))
-		} else if _, err := strconv.ParseFloat(val, 64); err == nil {
+			// Skip time as it's handled above
+			continue
+		}
+		
+		// Clean the value
+		val = strings.TrimSpace(val)
+		if val == "" {
+			continue
+		}
+
+		if _, err := strconv.ParseFloat(val, 64); err == nil {
 			conditions = append(conditions, fmt.Sprintf("%s = %s", col, val))
 		} else {
+			// Escape single quotes in string values
+			val = strings.ReplaceAll(val, "'", "''")
 			conditions = append(conditions, fmt.Sprintf("%s = '%s'", col, val))
 		}
 	}
@@ -158,23 +184,47 @@ func (s *ParquetServer) parseTimeRange(params map[string][]string) TimeRange {
 
 	if startStrArr, ok := params["start"]; ok && len(startStrArr) > 0 {
 		startStr := startStrArr[0]
-		startTime, err := time.Parse(time.RFC3339Nano, startStr)
+		// Try different time formats
+		startTime, err := parseTimeWithFormats(startStr)
 		if err == nil {
 			startNanos := startTime.UnixNano()
 			timeRange.Start = &startNanos
+		} else {
+			log.Printf("Failed to parse start time '%s': %v", startStr, err)
 		}
 	}
 
 	if endStrArr, ok := params["end"]; ok && len(endStrArr) > 0 {
 		endStr := endStrArr[0]
-		endTime, err := time.Parse(time.RFC3339Nano, endStr)
+		// Try different time formats
+		endTime, err := parseTimeWithFormats(endStr)
 		if err == nil {
 			endNanos := endTime.UnixNano()
 			timeRange.End = &endNanos
+		} else {
+			log.Printf("Failed to parse end time '%s': %v", endStr, err)
 		}
 	}
 
 	return timeRange
+}
+
+func parseTimeWithFormats(timeStr string) (time.Time, error) {
+	formats := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	}
+
+	for _, format := range formats {
+		if t, err := time.Parse(format, timeStr); err == nil {
+			return t, nil
+		}
+	}
+
+	return time.Time{}, fmt.Errorf("could not parse time with any known format")
 }
 
 func (s *ParquetServer) parseStreamConfig(params map[string][]string) StreamConfig {
