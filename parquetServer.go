@@ -130,26 +130,24 @@ func (s *ParquetServer) buildVirtualParquetQuery(dbName, measurement string, tim
 	// Build WHERE conditions
 	var conditions []string
 
-	// Add time range conditions - convert to microseconds
+	// Add time range conditions using epoch_ns
 	if timeRange.Start != nil {
-		startTime := time.Unix(0, *timeRange.Start)
-		startMicros := startTime.UnixMicro()
-		conditions = append(conditions, fmt.Sprintf("time >= %d", startMicros))
+		startTime := time.Unix(0, *timeRange.Start).UTC()
+		conditions = append(conditions, fmt.Sprintf("time >= epoch_ns(TIMESTAMP '%s')", 
+			startTime.Format("2006-01-02 15:04:05.999999999")))
 	}
 	if timeRange.End != nil {
-		endTime := time.Unix(0, *timeRange.End)
-		endMicros := endTime.UnixMicro()
-		conditions = append(conditions, fmt.Sprintf("time <= %d", endMicros))
+		endTime := time.Unix(0, *timeRange.End).UTC()
+		conditions = append(conditions, fmt.Sprintf("time <= epoch_ns(TIMESTAMP '%s')", 
+			endTime.Format("2006-01-02 15:04:05.999999999")))
 	}
 
 	// Add other filters
 	for col, val := range filters {
 		if col == "time" {
-			// Skip time as it's handled above
 			continue
 		}
 		
-		// Clean the value
 		val = strings.TrimSpace(val)
 		if val == "" {
 			continue
@@ -158,7 +156,6 @@ func (s *ParquetServer) buildVirtualParquetQuery(dbName, measurement string, tim
 		if _, err := strconv.ParseFloat(val, 64); err == nil {
 			conditions = append(conditions, fmt.Sprintf("%s = %s", col, val))
 		} else {
-			// Escape single quotes in string values
 			val = strings.ReplaceAll(val, "'", "''")
 			conditions = append(conditions, fmt.Sprintf("%s = '%s'", col, val))
 		}

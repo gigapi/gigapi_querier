@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -756,22 +757,38 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 		filesList.WriteString(fmt.Sprintf("'%s'", file))
 	}
 
-	// Modify the query to use the specific files we found
-	fromPattern := regexp.MustCompile(`(?i)FROM\s+(?:\w+\.)?(\w+)`)
-	modifiedQuery := fromPattern.ReplaceAllString(
-		query,
-		fmt.Sprintf("FROM read_parquet([%s], union_by_name=true)", filesList.String()),
-	)
+	// Create a temporary table for the results
+	tempTableName := fmt.Sprintf("temp_results_%d", time.Now().UnixNano())
+	createTableQuery := fmt.Sprintf("CREATE TEMPORARY TABLE %s AS SELECT * FROM read_parquet([%s], union_by_name=true)",
+		tempTableName, filesList.String())
+	
+	if _, err := c.DB.Exec(createTableQuery); err != nil {
+		return fmt.Errorf("failed to create temporary table: %v", err)
+	}
+	defer c.DB.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s", tempTableName))
 
-	// Execute the query and stream directly to parquet format
+	// Modify the original query to use the temp table
+	fromPattern := regexp.MustCompile(`(?i)FROM\s+(?:\w+\.)?(\w+)`)
+	modifiedQuery := fromPattern.ReplaceAllString(query, fmt.Sprintf("FROM %s", tempTableName))
+
+	// Execute the query and stream to parquet format
 	streamQuery := fmt.Sprintf("COPY (%s) TO '|' (FORMAT PARQUET, ROW_GROUP_SIZE %d, COMPRESSION %s)",
 		modifiedQuery,
 		config.RowGroupSize,
 		config.CompressionType,
 	)
 
-	// Use DuckDB's stdout streaming capability with existing connection
-	stmt, err := c.DB.Prepare(streamQuery)
+	log.Printf("Executing stream query: %s", streamQuery)
+
+	// Use a transaction to ensure consistency
+	tx, err := c.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	// Prepare and execute the streaming query
+	stmt, err := tx.Prepare(streamQuery)
 	if err != nil {
 		return fmt.Errorf("failed to prepare streaming query: %v", err)
 	}
@@ -783,7 +800,7 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 	}
 	defer rows.Close()
 
-	// Copy the data directly to the writer
+	// Write the parquet data
 	var buf []byte
 	for rows.Next() {
 		if err := rows.Scan(&buf); err != nil {
@@ -794,7 +811,11 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 		}
 	}
 
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("error during row iteration: %v", err)
+	}
+
+	return tx.Commit()
 }
 
 // Close releases resources
