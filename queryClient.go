@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	_ "github.com/marcboeker/go-duckdb/v2"
+	"github.com/parquet-go/parquet"
 )
 
 var db *sql.DB
@@ -732,90 +734,29 @@ func DefaultStreamConfig() StreamConfig {
 
 // StreamParquetResultsWithConfig executes a query and streams results with custom config
 func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.Writer, config StreamConfig) error {
-	// Parse the query to find relevant files
-	parsed, err := c.ParseQuery(query, dbName)
+	// Create temporary file
+	tmpFile, err := os.CreateTemp("", "*.parquet")
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create temp file: %v", err)
 	}
+	tmpFile.Close()
+	defer os.Remove(tmpFile.Name())
 
-	// Find relevant files
-	files, err := c.FindRelevantFiles(parsed.DbName, parsed.Measurement, parsed.TimeRange)
+	// Execute query directly to parquet file
+	_, err = c.DB.Exec(fmt.Sprintf("COPY (%s) TO '%s' (FORMAT PARQUET)", query, tmpFile.Name()))
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to execute query: %v", err)
 	}
 
-	if len(files) == 0 {
-		return fmt.Errorf("no relevant files found")
-	}
-
-	// Build file list for DuckDB
-	var filesList strings.Builder
-	for i, file := range files {
-		if i > 0 {
-			filesList.WriteString(", ")
-		}
-		filesList.WriteString(fmt.Sprintf("'%s'", file))
-	}
-
-	// Create a temporary table for the results
-	tempTableName := fmt.Sprintf("temp_results_%d", time.Now().UnixNano())
-	createTableQuery := fmt.Sprintf("CREATE TEMPORARY TABLE %s AS SELECT * FROM read_parquet([%s], union_by_name=true)",
-		tempTableName, filesList.String())
-	
-	if _, err := c.DB.Exec(createTableQuery); err != nil {
-		return fmt.Errorf("failed to create temporary table: %v", err)
-	}
-	defer c.DB.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s", tempTableName))
-
-	// Modify the original query to use the temp table
-	fromPattern := regexp.MustCompile(`(?i)FROM\s+(?:\w+\.)?(\w+)`)
-	modifiedQuery := fromPattern.ReplaceAllString(query, fmt.Sprintf("FROM %s", tempTableName))
-
-	// Execute the query and stream to parquet format
-	streamQuery := fmt.Sprintf("COPY (%s) TO '|' (FORMAT PARQUET, ROW_GROUP_SIZE %d, COMPRESSION %s)",
-		modifiedQuery,
-		config.RowGroupSize,
-		config.CompressionType,
-	)
-
-	log.Printf("Executing stream query: %s", streamQuery)
-
-	// Use a transaction to ensure consistency
-	tx, err := c.DB.Begin()
+	// Stream the file to the response
+	file, err := os.Open(tmpFile.Name())
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %v", err)
+		return fmt.Errorf("failed to open temp file: %v", err)
 	}
-	defer tx.Rollback()
+	defer file.Close()
 
-	// Prepare and execute the streaming query
-	stmt, err := tx.Prepare(streamQuery)
-	if err != nil {
-		return fmt.Errorf("failed to prepare streaming query: %v", err)
-	}
-	defer stmt.Close()
-
-	rows, err := stmt.Query()
-	if err != nil {
-		return fmt.Errorf("failed to execute streaming query: %v", err)
-	}
-	defer rows.Close()
-
-	// Write the parquet data
-	var buf []byte
-	for rows.Next() {
-		if err := rows.Scan(&buf); err != nil {
-			return fmt.Errorf("failed to scan row: %v", err)
-		}
-		if _, err := w.Write(buf); err != nil {
-			return fmt.Errorf("failed to write data: %v", err)
-		}
-	}
-
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("error during row iteration: %v", err)
-	}
-
-	return tx.Commit()
+	_, err = io.Copy(w, file)
+	return err
 }
 
 // Close releases resources
