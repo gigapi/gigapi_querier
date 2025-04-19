@@ -15,8 +15,6 @@ import (
 
 	_ "github.com/marcboeker/go-duckdb/v2"
 	"github.com/parquet-go/parquet-go"
-	"github.com/parquet-go/parquet-go/format"
-	"github.com/parquet-go/parquet-go/parquet"
 )
 
 var db *sql.DB
@@ -755,22 +753,13 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 	}
 
 	// Create schema
-	fields := make([]parquet.Field, len(columns))
-	for i, col := range columnTypes {
-		sqlType := col.DatabaseTypeName()
-		fields[i] = parquet.Field{
-			Name:     columns[i],
-			Type:     sqlTypeToParquetType(sqlType),
-			Optional: true,
-		}
-	}
-
-	schema := parquet.NewSchema("record", fields...)
+	schema := parquet.SchemaOf(new(map[string]interface{}))
 
 	// Create writer options
 	opts := []parquet.WriterOption{
-		parquet.WriteBufferSize(config.ChunkSize),
-		parquet.WriteCompression(parquet.Snappy),
+		parquet.WithCompressionCodec(parquet.Snappy),
+		parquet.WithCreator("GigAPI"),
+		parquet.WithBufferSize(config.ChunkSize),
 	}
 
 	// Create writer
@@ -805,30 +794,6 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 	}
 
 	return writer.Close()
-}
-
-// sqlTypeToParquetType converts SQL types to Parquet types
-func sqlTypeToParquetType(sqlType string) parquet.Type {
-	switch sqlType {
-	case "BIGINT":
-		return parquet.Int64Type
-	case "INTEGER":
-		return parquet.Int32Type
-	case "SMALLINT":
-		return parquet.Int16Type
-	case "BOOLEAN":
-		return parquet.BooleanType
-	case "REAL":
-		return parquet.FloatType
-	case "DOUBLE":
-		return parquet.DoubleType
-	case "VARCHAR", "TEXT":
-		return parquet.StringType
-	case "TIMESTAMP":
-		return parquet.Int64Type // Store as microseconds since epoch
-	default:
-		return parquet.StringType // Default to string for unknown types
-	}
 }
 
 // Close releases resources
