@@ -754,17 +754,33 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 	}
 	defer rows.Close()
 
-	// Get column information
+	// Get column information and types
 	columns, err := rows.Columns()
 	if err != nil {
 		return fmt.Errorf("failed to get columns: %v", err)
 	}
 
-	// Create writer with schema
-	writer := parquet.NewWriter(w, parquet.SchemaOf(new(Record)))
+	types, err := rows.ColumnTypes()
+	if err != nil {
+		return fmt.Errorf("failed to get column types: %v", err)
+	}
+
+	// Build dynamic schema based on actual columns
+	fields := make([]parquet.Field, len(columns))
+	for i, col := range types {
+		fields[i] = parquet.Field{
+			Name:     columns[i],
+			Type:     sqlTypeToParquetType(col.DatabaseTypeName()),
+			Optional: true,
+		}
+	}
+
+	// Create schema and writer
+	schema := parquet.NewSchema("", fields...)
+	writer := parquet.NewWriter(w, schema)
 	defer writer.Close()
 
-	// Prepare value holders
+	// Prepare value holders for scanning
 	values := make([]interface{}, len(columns))
 	valuePtrs := make([]interface{}, len(columns))
 	for i := range values {
@@ -777,53 +793,18 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 			return fmt.Errorf("failed to scan row: %v", err)
 		}
 
-		record := &Record{}
-		for i, col := range columns {
-			switch col {
-			case "time":
-				if v, ok := values[i].(int64); ok {
-					record.Time = v
-				}
-			case "method":
-				if v, ok := values[i].(string); ok {
-					record.Method = v
-				}
-			case "call_id":
-				if v, ok := values[i].(string); ok {
-					record.CallID = v
-				}
-			case "from_user":
-				if v, ok := values[i].(string); ok {
-					record.FromUser = v
-				}
-			case "to_user":
-				if v, ok := values[i].(string); ok {
-					record.ToUser = v
-				}
-			case "from_host":
-				if v, ok := values[i].(string); ok {
-					record.FromHost = v
-				}
-			case "to_host":
-				if v, ok := values[i].(string); ok {
-					record.ToHost = v
-				}
-			case "protocol":
-				if v, ok := values[i].(string); ok {
-					record.Protocol = v
-				}
-			case "family":
-				if v, ok := values[i].(string); ok {
-					record.Family = v
-				}
-			case "transport":
-				if v, ok := values[i].(string); ok {
-					record.Transport = v
-				}
+		// Create a row with proper types
+		row := make([]interface{}, len(columns))
+		for i, v := range values {
+			if v == nil {
+				continue
 			}
+
+			// Let the database driver handle the type conversion
+			row[i] = v
 		}
 
-		if err := writer.Write(record); err != nil {
+		if err := writer.WriteRow(row...); err != nil {
 			return fmt.Errorf("failed to write row: %v", err)
 		}
 	}
@@ -833,6 +814,27 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 	}
 
 	return writer.Close()
+}
+
+func sqlTypeToParquetType(sqlType string) parquet.Type {
+	switch sqlType {
+	case "BIGINT":
+		return parquet.Int64Type
+	case "INTEGER":
+		return parquet.Int32Type
+	case "SMALLINT":
+		return parquet.Int16Type
+	case "BOOLEAN":
+		return parquet.BooleanType
+	case "REAL":
+		return parquet.FloatType
+	case "DOUBLE":
+		return parquet.DoubleType
+	case "TIMESTAMP":
+		return parquet.Int64Type
+	default:
+		return parquet.StringType
+	}
 }
 
 // Close releases resources
