@@ -118,13 +118,33 @@ func (s *ParquetServer) handleArrowRequest(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *ParquetServer) buildVirtualParquetQuery(dbName, measurement string, timeRange TimeRange, filters map[string]string) string {
-	// Start with basic SELECT
-	query := fmt.Sprintf("SELECT * FROM %s.%s", dbName, measurement)
+	// Use the existing QueryClient functionality
+	parsed := &ParsedQuery{
+		DbName:      dbName,
+		Measurement: measurement,
+		TimeRange:   timeRange,
+	}
 
-	// Build WHERE conditions
+	// Find relevant files
+	files, err := s.queryClient.FindRelevantFiles(dbName, measurement, timeRange)
+	if err != nil {
+		return ""
+	}
+
+	// Build file list for DuckDB
+	var filesList strings.Builder
+	for i, file := range files {
+		if i > 0 {
+			filesList.WriteString(", ")
+		}
+		filesList.WriteString(fmt.Sprintf("'%s'", file))
+	}
+
+	// Build the query using read_parquet
+	query := fmt.Sprintf("SELECT * FROM read_parquet([%s], union_by_name=true)", filesList.String())
+
+	// Add time conditions
 	var conditions []string
-
-	// Add time range conditions using epoch_ns
 	if timeRange.Start != nil {
 		startTime := time.Unix(0, *timeRange.Start).UTC()
 		conditions = append(conditions, fmt.Sprintf("time >= epoch_ns(TIMESTAMP '%s')", 
@@ -141,12 +161,10 @@ func (s *ParquetServer) buildVirtualParquetQuery(dbName, measurement string, tim
 		if col == "time" {
 			continue
 		}
-		
 		val = strings.TrimSpace(val)
 		if val == "" {
 			continue
 		}
-
 		if _, err := strconv.ParseFloat(val, 64); err == nil {
 			conditions = append(conditions, fmt.Sprintf("%s = %s", col, val))
 		} else {
@@ -159,7 +177,6 @@ func (s *ParquetServer) buildVirtualParquetQuery(dbName, measurement string, tim
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
 
-	log.Printf("Built query with time conditions: %v", conditions)
 	return query
 }
 
