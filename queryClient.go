@@ -733,36 +733,7 @@ type DynamicRow struct {
 
 // StreamParquetResultsWithConfig executes a query and streams results
 func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.Writer, config StreamConfig) error {
-	// First get schema from one of our parquet files
-	files, err := c.FindRelevantFiles(dbName, "", TimeRange{})
-	if err != nil || len(files) == 0 {
-		return fmt.Errorf("no files found to read schema from")
-	}
-
-	// Open first file to get schema
-	file, err := os.Open(files[0])
-	if err != nil {
-		return fmt.Errorf("failed to open parquet file: %v", err)
-	}
-	defer file.Close()
-
-	// Get file info for size
-	stat, err := file.Stat()
-	if err != nil {
-		return fmt.Errorf("failed to get file info: %v", err)
-	}
-
-	// Read parquet file
-	pf, err := parquet.OpenFile(file, stat.Size())
-	if err != nil {
-		return fmt.Errorf("failed to open parquet file for schema: %v", err)
-	}
-
-	// Create writer using the same schema
-	writer := parquet.NewWriter(w, pf.Schema())
-	defer writer.Close()
-
-	// Execute query
+	// Execute query first to get column information
 	stmt, err := c.DB.Prepare(query)
 	if err != nil {
 		return fmt.Errorf("failed to prepare query: %v", err)
@@ -775,11 +746,40 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 	}
 	defer rows.Close()
 
-	// Get column information
+	// Get column information and types
 	columns, err := rows.Columns()
 	if err != nil {
 		return fmt.Errorf("failed to get columns: %v", err)
 	}
+
+	types, err := rows.ColumnTypes()
+	if err != nil {
+		return fmt.Errorf("failed to get column types: %v", err)
+	}
+
+	// Create a row template with proper types for schema inference
+	rowTemplate := make(map[string]interface{})
+	for i, col := range columns {
+		// Initialize with zero values based on SQL type
+		switch types[i].DatabaseTypeName() {
+		case "BIGINT", "TIMESTAMP":
+			rowTemplate[col] = int64(0)
+		case "INTEGER":
+			rowTemplate[col] = int32(0)
+		case "BOOLEAN":
+			rowTemplate[col] = false
+		case "REAL":
+			rowTemplate[col] = float32(0)
+		case "DOUBLE":
+			rowTemplate[col] = float64(0)
+		default:
+			rowTemplate[col] = ""
+		}
+	}
+
+	// Create writer with schema derived from our template
+	writer := parquet.NewWriter(w, parquet.SchemaOf(rowTemplate))
+	defer writer.Close()
 
 	// Prepare value holders for scanning
 	values := make([]interface{}, len(columns))
