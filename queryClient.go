@@ -726,20 +726,6 @@ func DefaultStreamConfig() StreamConfig {
 	}
 }
 
-// Record represents a row in our data
-type Record struct {
-	Time      int64  `parquet:"time"`
-	Method    string `parquet:"method"`
-	CallID    string `parquet:"call_id"`
-	FromUser  string `parquet:"from_user"`
-	ToUser    string `parquet:"to_user"`
-	FromHost  string `parquet:"from_host"`
-	ToHost    string `parquet:"to_host"`
-	Protocol  string `parquet:"protocol"`
-	Family    string `parquet:"family"`
-	Transport string `parquet:"transport"`
-}
-
 // StreamParquetResultsWithConfig executes a query and streams results
 func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.Writer, config StreamConfig) error {
 	stmt, err := c.DB.Prepare(query)
@@ -823,27 +809,6 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 	}
 
 	return writer.Close()
-}
-
-func sqlTypeToParquetType(sqlType string) parquet.Type {
-	switch sqlType {
-	case "BIGINT":
-		return parquet.Int64Type
-	case "INTEGER":
-		return parquet.Int32Type
-	case "SMALLINT":
-		return parquet.Int16Type
-	case "BOOLEAN":
-		return parquet.BooleanType
-	case "REAL":
-		return parquet.FloatType
-	case "DOUBLE":
-		return parquet.DoubleType
-	case "TIMESTAMP":
-		return parquet.Int64Type
-	default:
-		return parquet.StringType
-	}
 }
 
 // Close releases resources
