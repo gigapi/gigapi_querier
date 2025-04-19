@@ -80,39 +80,26 @@ func (s *ParquetServer) handleArrowRequest(w http.ResponseWriter, r *http.Reques
 	timeRange := s.parseTimeRange(r.URL.Query())
 	filters := s.parseFilters(r.URL.Query())
 
-	// Verify that we have data available
+	// Find relevant files
 	files, err := s.queryClient.FindRelevantFiles(dbName, measurement, timeRange)
 	if err != nil {
-		log.Printf("Error finding files: %v", err)
-		http.Error(w, fmt.Sprintf("Error finding files: %v", err), http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	
-	if len(files) == 0 {
-		log.Printf("No files found for db=%s measurement=%s timeRange=%+v", dbName, measurement, timeRange)
-		http.Error(w, "No data found", http.StatusNotFound)
-		return
-	}
-
 	log.Printf("Found %d files for request", len(files))
 
-	// Set headers for Arrow streaming
-	w.Header().Set("Content-Type", "application/x-arrow")
-	
-	// For HEAD requests, we're done
 	if r.Method == "HEAD" {
 		return
 	}
 
-	// Build and execute query
-	config := s.parseStreamConfig(r.URL.Query())
+	// Build query
 	query := s.buildVirtualParquetQuery(dbName, measurement, timeRange, filters)
-
 	log.Printf("Executing query: %s", query)
 
-	if err := s.queryClient.StreamParquetResultsWithConfig(query, dbName, w, config); err != nil {
+	// Stream results using the files we already found
+	if err := s.queryClient.StreamParquetResultsWithConfig(query, dbName, w, StreamConfig{}, files); err != nil {
 		log.Printf("Error streaming results: %v", err)
-		http.Error(w, fmt.Sprintf("Failed to stream results: %v", err), http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 }

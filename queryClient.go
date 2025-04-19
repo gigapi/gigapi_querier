@@ -732,17 +732,9 @@ type DynamicRow struct {
 }
 
 // StreamParquetResultsWithConfig executes a query and streams results
-func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.Writer, config StreamConfig) error {
-	// Parse query to get correct measurement
-	parsed, err := c.ParseQuery(query, dbName)
-	if err != nil {
-		return fmt.Errorf("failed to parse query: %v", err)
-	}
-
-	// Get files using the same parameters as the query
-	files, err := c.FindRelevantFiles(parsed.DbName, parsed.Measurement, parsed.TimeRange)
-	if err != nil || len(files) == 0 {
-		return fmt.Errorf("no files found to read schema from")
+func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.Writer, config StreamConfig, files []string) error {
+	if len(files) == 0 {
+		return fmt.Errorf("no files provided for streaming")
 	}
 
 	// Open first file to get schema
