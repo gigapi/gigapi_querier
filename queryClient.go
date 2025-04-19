@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -747,9 +746,8 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 		return fmt.Errorf("failed to get columns: %v", err)
 	}
 
-	// Create schema and writer
-	schema := parquet.SchemaOf(new(map[string]interface{}))
-	writer := parquet.NewWriter(w)
+	// Create writer with schema
+	writer := parquet.NewWriter(w, parquet.SchemaOf(new(map[string]interface{})))
 	defer writer.Close()
 
 	// Prepare value holders
