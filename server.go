@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"./icecube"
+	"github.com/gigapi/gigapi_querier/icecube"
 )
 
 // Server represents the API server
