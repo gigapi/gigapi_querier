@@ -14,7 +14,7 @@ import (
 
 	_ "github.com/marcboeker/go-duckdb/v2"
 	"github.com/parquet-go/parquet-go"
-	"github.com/your-project/icecube"
+	"github.com/gigapi/gigapi_querier/icecube"
 )
 
 var db *sql.DB
