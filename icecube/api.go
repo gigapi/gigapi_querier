@@ -3,9 +3,33 @@ package icecube
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/mux"
 )
+
+// TableFormat represents supported table formats
+type TableFormat string
+
+const (
+	FormatParquet TableFormat = "parquet"
+	FormatDelta   TableFormat = "delta"
+)
+
+// Storage defines the interface for different table storage formats
+type Storage interface {
+	// List tables in a namespace
+	ListTables(namespace string) ([]string, error)
+	
+	// Get table metadata
+	GetTableMetadata(namespace, table string) (*TableMetadata, error)
+	
+	// Get files that match time range
+	GetFiles(namespace, table string, startTime, endTime *time.Time) ([]FileInfo, error)
+	
+	// Build query for the storage format
+	BuildQuery(files []FileInfo, startTime, endTime *time.Time, filters map[string]string) (string, error)
+}
 
 // API handles REST endpoints for the IceCube catalog
 type API struct {
@@ -76,7 +100,8 @@ func (a *API) listTableFiles(w http.ResponseWriter, r *http.Request) {
 
 	// Try each storage format
 	for _, s := range a.storages {
-		if metadata, err := s.GetTableMetadata(namespace, table); err == nil {
+		// Just check if table exists
+		if _, err := s.GetTableMetadata(namespace, table); err == nil {
 			files, err := s.GetFiles(namespace, table, nil, nil)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
