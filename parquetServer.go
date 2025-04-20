@@ -10,11 +10,13 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/your/repo/icecube" // Update with correct import path
 )
 
 // ParquetServer handles HTTP requests for virtual parquet files
 type ParquetServer struct {
 	queryClient *QueryClient
+	catalog     *icecube.Catalog
 }
 
 // NewParquetServer creates a new ParquetServer instance
@@ -26,6 +28,7 @@ func NewParquetServer(dataDir string) (*ParquetServer, error) {
 
 	return &ParquetServer{
 		queryClient: qc,
+		catalog:     &icecube.Catalog{RootPath: dataDir},
 	}, nil
 }
 
@@ -71,33 +74,31 @@ func (s *ParquetServer) handleSchemaRequest(w http.ResponseWriter, r *http.Reque
 func (s *ParquetServer) handleArrowRequest(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	dbName := vars["db"]
-	measurement := vars["measurement"]
+	measurement := vars["table"] // Note: changed from measurement to table for consistency
 
-	// Log incoming request
-	log.Printf("Arrow request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
-
-	// Parse query parameters for filtering
+	// Parse query parameters
 	timeRange := s.parseTimeRange(r.URL.Query())
 	filters := s.parseFilters(r.URL.Query())
 
-	// Find relevant files
-	files, err := s.queryClient.FindRelevantFiles(dbName, measurement, timeRange)
+	// Use IceCube to get files
+	opts := icecube.QueryOptions{
+		StartTime: timeRange.Start,
+		EndTime:   timeRange.End,
+		Filters:   filters,
+	}
+
+	// Get DuckDB query from IceCube
+	query, err := s.catalog.GetDuckDBQuery(dbName, measurement, opts)
 	if err != nil {
+		log.Printf("Error building query: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	log.Printf("Found %d files for request", len(files))
 
-	if r.Method == "HEAD" {
-		return
-	}
-
-	// Build query
-	query := s.buildVirtualParquetQuery(dbName, measurement, timeRange, filters)
 	log.Printf("Executing query: %s", query)
 
-	// Stream results using the files we already found
-	if err := s.queryClient.StreamParquetResultsWithConfig(query, dbName, w, StreamConfig{}, files); err != nil {
+	// Stream results
+	if err := s.queryClient.StreamParquetResultsWithConfig(query, dbName, w, StreamConfig{}); err != nil {
 		log.Printf("Error streaming results: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

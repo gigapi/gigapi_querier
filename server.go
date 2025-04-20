@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/your/repo/icecube" // Update with correct import path
 )
 
 // Server represents the API server
@@ -165,64 +166,38 @@ func (s *Server) Close() error {
 }
 
 func main() {
-	// Add command line flags
-	queryFlag := flag.String("query", "", "Execute a single query and exit")
-	dbFlag := flag.String("db", "mydb", "Database name to query")
+	var (
+		port    = flag.Int("port", 8080, "Server port")
+		dataDir = flag.String("data-dir", "", "Data directory path")
+	)
 	flag.Parse()
 
-	// Get configuration from environment variables
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
+	if *dataDir == "" {
+		*dataDir = os.Getenv("DATA_DIR")
 	}
-
-	dataDir := os.Getenv("DATA_DIR")
-	if dataDir == "" {
-		dataDir = "./data"
+	if *dataDir == "" {
+		log.Fatal("Data directory not specified")
 	}
-
-	// Create QueryClient
-	client := NewQueryClient(dataDir)
-	err := client.Initialize()
-	if err != nil {
-		log.Fatalf("Failed to initialize query client: %v", err)
-	}
-	defer client.Close()
-
-	// If query flag is provided, execute query and exit
-	if *queryFlag != "" {
-		results, err := client.Query(*queryFlag, *dbFlag)
-		if err != nil {
-			log.Fatalf("Query error: %v", err)
-		}
-
-		// Process and print results as JSON
-		processedResults := processResultsForJSON(results)
-		jsonData, err := json.MarshalIndent(processedResults, "", "  ")
-		if err != nil {
-			log.Fatalf("Failed to marshal results: %v", err)
-		}
-		fmt.Println(string(jsonData))
-		return
-	}
-
-	// Create server for HTTP mode
-	server, err := NewServer(dataDir)
-	if err != nil {
-		log.Fatalf("Failed to initialize server: %v", err)
-	}
-	defer server.Close()
 
 	// Create router
-	router := mux.NewRouter()
+	r := mux.NewRouter()
 
-	// Add routes
-	router.HandleFunc("/health", server.handleHealth)
-	router.HandleFunc("/query", server.handleQuery)
-	router.HandleFunc("/arrow/{db}/{measurement}", server.ParquetServer.handleArrowRequest).Methods("GET", "HEAD")
-	router.HandleFunc("/schema/{db}/{measurement}", server.ParquetServer.handleSchemaRequest).Methods("GET")
+	// Initialize ParquetServer
+	parquetServer, err := NewParquetServer(*dataDir)
+	if err != nil {
+		log.Fatalf("Failed to create parquet server: %v", err)
+	}
 
-	// Start server with the router
-	log.Printf("GigAPI server running at http://localhost:%s", port)
-	log.Fatal(http.ListenAndServe(":"+port, router))
+	// Initialize IceCube API
+	iceCubeAPI := icecube.NewAPI(*dataDir)
+	iceCubeAPI.RegisterRoutes(r)
+
+	// Add existing routes
+	r.HandleFunc("/arrow/{db}/{measurement}", parquetServer.handleArrowRequest).Methods("GET", "HEAD")
+	r.HandleFunc("/schema/{db}/{measurement}", parquetServer.handleSchemaRequest).Methods("GET")
+
+	// Start server
+	addr := fmt.Sprintf(":%d", *port)
+	log.Printf("GigAPI server running at http://localhost%s", addr)
+	log.Fatal(http.ListenAndServe(addr, r))
 }

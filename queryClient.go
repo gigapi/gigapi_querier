@@ -14,6 +14,7 @@ import (
 
 	_ "github.com/marcboeker/go-duckdb/v2"
 	"github.com/parquet-go/parquet-go"
+	"github.com/your-project/icecube"
 )
 
 var db *sql.DB
@@ -23,6 +24,7 @@ type QueryClient struct {
 	DataDir          string
 	DB               *sql.DB
 	DefaultTimeRange int64 // 10 minutes in nanoseconds
+	catalog          *icecube.Catalog
 }
 
 // NewQueryClient creates a new QueryClient
@@ -30,6 +32,7 @@ func NewQueryClient(dataDir string) *QueryClient {
 	return &QueryClient{
 		DataDir:          dataDir,
 		DefaultTimeRange: 10 * 60 * 1000000000, // 10 minutes in nanoseconds
+		catalog:          &icecube.Catalog{RootPath: dataDir},
 	}
 }
 
@@ -298,64 +301,13 @@ func (q *QueryClient) enumFolderNoMetadata(path string) ([]string, error) {
 }
 
 // Find relevant parquet files based on time range
-func (q *QueryClient) FindRelevantFiles(dbName, measurement string, timeRange TimeRange) ([]string, error) {
-	// If no time range specified, get all files
-	if timeRange.Start == nil && timeRange.End == nil {
-		return q.findAllFiles(dbName, measurement)
+func (q *QueryClient) FindRelevantFiles(dbName, table string, timeRange TimeRange) ([]string, error) {
+	opts := icecube.QueryOptions{
+		StartTime: timeRange.Start,
+		EndTime:   timeRange.End,
 	}
-
-	var relevantFiles []string
-
-	// Convert nanosecond timestamps to time.Time for directory parsing
-	var startDate, endDate time.Time
-	if timeRange.Start != nil {
-		startDate = time.Unix(0, *timeRange.Start)
-	} else {
-		startDate = time.Unix(0, 0) // Beginning of epoch
-	}
-
-	if timeRange.End != nil {
-		endDate = time.Unix(0, *timeRange.End)
-	} else {
-		endDate = time.Now() // Current time
-	}
-
-	// Get all date directories that might contain relevant data
-	dateDirectories, err := q.getDateDirectoriesInRange(dbName, measurement, startDate, endDate)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, dateDir := range dateDirectories {
-		// For each date directory, get all hour directories
-		datePath := filepath.Join(q.DataDir, dbName, measurement, dateDir)
-		hourDirs, err := q.getHourDirectoriesInRange(datePath, startDate, endDate)
-		if err != nil {
-			continue // Skip this directory on error
-		}
-
-		for _, hourDir := range hourDirs {
-			hourPath := filepath.Join(datePath, hourDir)
-
-			// Read metadata.json
-			metadataPath := filepath.Join(hourPath, "metadata.json")
-			if _, err := os.Stat(metadataPath); err == nil {
-				_relevantFiles, err := q.enumFolderWithMetadata(metadataPath, timeRange)
-				if err == nil {
-					relevantFiles = append(relevantFiles, _relevantFiles...)
-					continue
-				}
-			}
-
-			_relevantFiles, err := q.enumFolderNoMetadata(hourPath)
-			if err == nil {
-				relevantFiles = append(relevantFiles, _relevantFiles...)
-				continue
-			}
-		}
-	}
-
-	return relevantFiles, nil
+	
+	return q.catalog.GetQueryableFiles(dbName, table, opts)
 }
 
 // Find all files for a measurement
@@ -732,36 +684,9 @@ type DynamicRow struct {
 }
 
 // StreamParquetResultsWithConfig executes a query and streams results
-func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.Writer, config StreamConfig, files []string) error {
-	if len(files) == 0 {
-		return fmt.Errorf("no files provided for streaming")
-	}
-
-	// Open first file to get schema
-	file, err := os.Open(files[0])
-	if err != nil {
-		return fmt.Errorf("failed to open parquet file: %v", err)
-	}
-	defer file.Close()
-
-	// Get file info for size
-	stat, err := file.Stat()
-	if err != nil {
-		return fmt.Errorf("failed to get file info: %v", err)
-	}
-
-	// Read parquet file
-	pf, err := parquet.OpenFile(file, stat.Size())
-	if err != nil {
-		return fmt.Errorf("failed to open parquet file for schema: %v", err)
-	}
-
-	// Create writer using the same schema
-	writer := parquet.NewWriter(w, pf.Schema())
-	defer writer.Close()
-
+func (q *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.Writer, config StreamConfig) error {
 	// Execute query
-	stmt, err := c.DB.Prepare(query)
+	stmt, err := q.DB.Prepare(query)
 	if err != nil {
 		return fmt.Errorf("failed to prepare query: %v", err)
 	}
@@ -779,20 +704,50 @@ func (c *QueryClient) StreamParquetResultsWithConfig(query, dbName string, w io.
 		return fmt.Errorf("failed to get columns: %v", err)
 	}
 
-	// Prepare value holders for scanning
+	// Get schema from first row
 	values := make([]interface{}, len(columns))
 	valuePtrs := make([]interface{}, len(columns))
 	for i := range values {
 		valuePtrs[i] = &values[i]
 	}
 
-	// Stream rows
+	if !rows.Next() {
+		// No data, return empty result with schema
+		emptyRow := make(map[string]interface{})
+		for _, col := range columns {
+			emptyRow[col] = nil
+		}
+		writer := parquet.NewWriter(w, parquet.SchemaOf(emptyRow))
+		return writer.Close()
+	}
+
+	if err := rows.Scan(valuePtrs...); err != nil {
+		return fmt.Errorf("failed to scan first row: %v", err)
+	}
+
+	// Create first row and use it for schema
+	firstRow := make(map[string]interface{})
+	for i, col := range columns {
+		if values[i] != nil {
+			firstRow[col] = values[i]
+		}
+	}
+
+	// Create writer with schema from first row
+	writer := parquet.NewWriter(w, parquet.SchemaOf(firstRow))
+	defer writer.Close()
+
+	// Write first row
+	if err := writer.Write(firstRow); err != nil {
+		return fmt.Errorf("failed to write first row: %v", err)
+	}
+
+	// Stream remaining rows
 	for rows.Next() {
 		if err := rows.Scan(valuePtrs...); err != nil {
 			return fmt.Errorf("failed to scan row: %v", err)
 		}
 
-		// Create a row with proper types
 		row := make(map[string]interface{})
 		for i, col := range columns {
 			if values[i] != nil {
