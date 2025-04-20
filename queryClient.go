@@ -303,8 +303,8 @@ func (q *QueryClient) enumFolderNoMetadata(path string) ([]string, error) {
 // Find relevant parquet files based on time range
 func (q *QueryClient) FindRelevantFiles(dbName, table string, timeRange TimeRange) ([]string, error) {
 	opts := icecube.QueryOptions{
-		StartTime: timeRange.Start,
-		EndTime:   timeRange.End,
+		StartTime: icecube.Int64ToTime(timeRange.Start),
+		EndTime:   icecube.Int64ToTime(timeRange.End),
 	}
 	
 	return q.catalog.GetQueryableFiles(dbName, table, opts)

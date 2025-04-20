@@ -82,8 +82,8 @@ func (s *ParquetServer) handleArrowRequest(w http.ResponseWriter, r *http.Reques
 
 	// Use IceCube to get files
 	opts := icecube.QueryOptions{
-		StartTime: timeRange.Start,
-		EndTime:   timeRange.End,
+		StartTime: icecube.Int64ToTime(timeRange.Start),
+		EndTime:   icecube.Int64ToTime(timeRange.End),
 		Filters:   filters,
 	}
 

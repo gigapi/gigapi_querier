@@ -13,6 +13,15 @@ type QueryOptions struct {
 	Filters   map[string]string
 }
 
+// Int64ToTime converts nanosecond timestamp to *time.Time
+func Int64ToTime(ts *int64) *time.Time {
+	if ts == nil {
+		return nil
+	}
+	t := time.Unix(0, *ts)
+	return &t
+}
+
 // GetQueryableFiles returns a list of parquet files that match the query criteria
 func (c *Catalog) GetQueryableFiles(namespace, table string, opts QueryOptions) ([]string, error) {
 	metadata, err := c.GetTableMetadata(namespace, table)
