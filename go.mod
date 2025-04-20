@@ -19,6 +19,7 @@ require (
 	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
 	github.com/marcboeker/go-duckdb/arrowmapping v0.0.7 // indirect
 	github.com/marcboeker/go-duckdb/mapping v0.0.7 // indirect
+	github.com/marcboeker/go-duckdb/v2 v2.2.0
 	github.com/parquet-go/parquet-go v0.20.0
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
@@ -28,4 +29,11 @@ require (
 	golang.org/x/sys v0.29.0 // indirect
 	golang.org/x/tools v0.29.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
+)
+
+replace (
+	github.com/gigapi/gigapi_querier/icecube => ./icecube
+	github.com/gigapi/gigapi_querier/icecube/storage => ./icecube/storage
+	github.com/gigapi/gigapi_querier/icecube/storage/delta => ./icecube/storage/delta
+	github.com/gigapi/gigapi_querier/icecube/storage/parquet => ./icecube/storage/parquet
 )
