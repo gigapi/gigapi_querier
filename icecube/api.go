@@ -5,9 +5,9 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
-	"github.com/gigapi/gigapi_querier/icecube/storage"
-	"github.com/gigapi/gigapi_querier/icecube/storage/parquet"
-	"github.com/gigapi/gigapi_querier/icecube/storage/delta"
+	"./storage"
+	"./storage/parquet"
+	"./storage/delta"
 )
 
 // API handles REST endpoints for the IceCube catalog

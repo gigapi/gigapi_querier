@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/gigapi/gigapi_querier/icecube" // Fixed import path
+	"./icecube"
 )
 
 // ParquetServer handles HTTP requests for virtual parquet files
