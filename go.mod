@@ -30,10 +30,3 @@ require (
 	golang.org/x/tools v0.29.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
 )
-
-replace (
-	github.com/gigapi/gigapi_querier/icecube => ./icecube
-	github.com/gigapi/gigapi_querier/icecube/storage => ./icecube/storage
-	github.com/gigapi/gigapi_querier/icecube/storage/delta => ./icecube/storage/delta
-	github.com/gigapi/gigapi_querier/icecube/storage/parquet => ./icecube/storage/parquet
-)
