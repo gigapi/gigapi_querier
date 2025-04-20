@@ -9,15 +9,15 @@ import (
 
 // API handles REST endpoints for the IceCube catalog
 type API struct {
-	storages map[storage.TableFormat]storage.Storage
+	storages map[TableFormat]Storage
 }
 
 // NewAPI creates a new IceCube API instance
 func NewAPI(rootPath string) *API {
 	return &API{
-		storages: map[storage.TableFormat]storage.Storage{
-			storage.FormatParquet: parquet.NewParquetStorage(rootPath),
-			storage.FormatDelta:   delta.NewDeltaStorage(rootPath),
+		storages: map[TableFormat]Storage{
+			FormatParquet: NewParquetStorage(rootPath),
+			FormatDelta:   NewDeltaStorage(rootPath),
 		},
 	}
 }
@@ -41,13 +41,16 @@ func (a *API) listTables(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	namespace := vars["namespace"]
 	
-	tables, err := a.catalog.ListTables(namespace)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	var allTables []string
+	for _, storage := range a.storages {
+		tables, err := storage.ListTables(namespace)
+		if err != nil {
+			continue
+		}
+		allTables = append(allTables, tables...)
 	}
 
-	json.NewEncoder(w).Encode(tables)
+	json.NewEncoder(w).Encode(allTables)
 }
 
 func (a *API) getTableMetadata(w http.ResponseWriter, r *http.Request) {
@@ -71,11 +74,18 @@ func (a *API) listTableFiles(w http.ResponseWriter, r *http.Request) {
 	namespace := vars["namespace"]
 	table := vars["table"]
 
-	metadata, err := a.catalog.GetTableMetadata(namespace, table)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	// Try each storage format
+	for _, s := range a.storages {
+		if metadata, err := s.GetTableMetadata(namespace, table); err == nil {
+			files, err := s.GetFiles(namespace, table, nil, nil)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			json.NewEncoder(w).Encode(files)
+			return
+		}
 	}
 
-	json.NewEncoder(w).Encode(metadata.Files)
+	http.Error(w, "Table not found", http.StatusNotFound)
 } 
