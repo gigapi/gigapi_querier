@@ -2,9 +2,7 @@ package icecube
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"path/filepath"
 
 	"github.com/gorilla/mux"
 )
