@@ -5,17 +5,23 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
+	"github.com/gigapi/gigapi_querier/icecube/storage"
+	"github.com/gigapi/gigapi_querier/icecube/storage/parquet"
+	"github.com/gigapi/gigapi_querier/icecube/storage/delta"
 )
 
 // API handles REST endpoints for the IceCube catalog
 type API struct {
-	catalog *Catalog
+	storages map[storage.TableFormat]storage.Storage
 }
 
 // NewAPI creates a new IceCube API instance
 func NewAPI(rootPath string) *API {
 	return &API{
-		catalog: &Catalog{RootPath: rootPath},
+		storages: map[storage.TableFormat]storage.Storage{
+			storage.FormatParquet: parquet.NewParquetStorage(rootPath),
+			storage.FormatDelta:   delta.NewDeltaStorage(rootPath),
+		},
 	}
 }
 
@@ -51,14 +57,16 @@ func (a *API) getTableMetadata(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	namespace := vars["namespace"]
 	table := vars["table"]
-
-	metadata, err := a.catalog.GetTableMetadata(namespace, table)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	
+	// Try each storage format
+	for _, s := range a.storages {
+		if metadata, err := s.GetTableMetadata(namespace, table); err == nil {
+			json.NewEncoder(w).Encode(metadata)
+			return
+		}
 	}
-
-	json.NewEncoder(w).Encode(metadata)
+	
+	http.Error(w, "Table not found", http.StatusNotFound)
 }
 
 func (a *API) listTableFiles(w http.ResponseWriter, r *http.Request) {

@@ -1,6 +1,6 @@
-# IceCube - Lightweight Iceberg REST Catalog
+# IceCube - Lightweight Iceberg & Delta Lake REST Catalog
 
-IceCube is a lightweight implementation of the Apache Iceberg REST catalog protocol, designed to work with existing hive-partitioned parquet files. It provides metadata management and query optimization for DuckDB and other Iceberg-compatible clients.
+IceCube is a lightweight implementation of catalog protocols for both Apache Iceberg and Delta Lake formats. It provides metadata management and query optimization for DuckDB and other compatible clients.
 
 ## API Endpoints
 
@@ -23,16 +23,20 @@ curl http://localhost:9999/icecube/v1/namespaces/hep/tables/hep_1/files
 
 ### Setup
 ```sql
--- Install and load Iceberg extension
+-- For Iceberg tables
 INSTALL iceberg;
 LOAD iceberg;
-
--- Configure Iceberg to use our REST catalog
 SET iceberg_catalog='rest';
 SET iceberg_rest_catalog_url='http://localhost:9999/icecube/v1';
+
+-- For Delta Lake tables
+INSTALL delta;
+LOAD delta;
 ```
 
 ### Basic Queries
+
+#### Iceberg Tables
 ```sql
 -- List available tables
 SELECT * FROM iceberg_tables();
@@ -51,44 +55,25 @@ SELECT * FROM iceberg_table_metadata('hep.hep_1');
 SELECT * FROM iceberg_files('hep.hep_1');
 ```
 
-### Performance Testing
-
-#### Time-Based Pruning
+#### Delta Lake Tables
 ```sql
--- Test file pruning efficiency
-SELECT COUNT(*) 
-FROM iceberg_scan('hep.hep_1') 
-WHERE time BETWEEN 
-  epoch_ns(TIMESTAMP '2025-04-18 12:00:00') AND 
-  epoch_ns(TIMESTAMP '2025-04-18 13:00:00');
+-- Query Delta table
+SELECT * 
+FROM delta_scan('hep.delta_table', 
+    REST_CATALOG_URL='http://localhost:9999/icecube/v1')
+WHERE time >= epoch_ns(TIMESTAMP '2025-04-18 12:00:00')
+LIMIT 5;
 
--- Compare execution plans
-EXPLAIN SELECT * 
-FROM iceberg_scan('hep.hep_1') 
-WHERE time >= epoch_ns(TIMESTAMP '2025-04-18 12:00:00');
-```
+-- Get Delta table history
+SELECT * FROM delta_history('hep.delta_table');
 
-### Comparison with Arrow API
-```sql
--- Compare results between Iceberg and Arrow endpoints
-WITH iceberg_data AS (
-  SELECT * FROM iceberg_scan('hep.hep_1')
-  WHERE time >= epoch_ns(TIMESTAMP '2025-04-18 12:00:00')
-    AND time < epoch_ns(TIMESTAMP '2025-04-18 13:00:00')
-),
-arrow_data AS (
-  SELECT * FROM read_parquet('http://localhost:9999/arrow/hep/hep_1?start=2025-04-18T12:00:00Z&end=2025-04-18T13:00:00Z')
-)
-SELECT 
-  'iceberg' as source, COUNT(*) as row_count FROM iceberg_data
-UNION ALL
-SELECT 
-  'arrow' as source, COUNT(*) as row_count FROM arrow_data;
+-- Get table details
+SELECT * FROM delta_table_details('hep.delta_table');
 ```
 
 ## File Structure
 
-IceCube works with the following directory structure:
+### Iceberg Structure
 ```
 /data
   /mydb
@@ -97,47 +82,72 @@ IceCube works with the following directory structure:
         /hour=14
           *.parquet
           metadata.json
-        /hour=15
-          *.parquet
-          metadata.json
 ```
 
-Example metadata.json:
+### Delta Lake Structure
+```
+/data
+  /mydb
+    /weather
+      /_delta_log
+        *.json           # Transaction logs
+        *.checkpoint.parquet  # Checkpoints
+      /date=2025-04-10
+        /hour=14
+          *.parquet      # Data files
+```
+
+## Delta Lake Support
+
+### Transaction Log Format
 ```json
 {
-  "type": "hep_1",
-  "parquet_size_bytes": 866559,
-  "row_count": 3984,
-  "min_time": 1745107202849660286,
-  "max_time": 1745110788388557205,
-  "wal_sequence": 0,
-  "files": [
-    {
-      "id": 1746,
-      "path": "/data/hep/hep_1/date=2025-04-20/hour=00/5640d9ee-1d7f-11f0-a328-0242ac1d0004.4.parquet",
-      "size_bytes": 435581,
-      "row_count": 2297,
-      "chunk_time": 1745109319428876227,
-      "min_time": 1745107202849660286,
-      "max_time": 1745109263230086438,
-      "range": "1h",
-      "type": "compacted"
-    }
-  ]
+  "commitInfo": {
+    "timestamp": 1650000000000,
+    "operation": "WRITE",
+    "operationParameters": {...}
+  },
+  "protocol": {
+    "minReaderVersion": 1,
+    "minWriterVersion": 2
+  },
+  "metaData": {
+    "id": "table-id",
+    "format": {
+      "provider": "parquet"
+    },
+    "schemaString": "...",
+    "partitionColumns": ["date", "hour"]
+  },
+  "add": {
+    "path": "date=2025-04-10/hour=14/file.parquet",
+    "size": 1234567,
+    "modificationTime": 1650000000000,
+    "dataChange": true,
+    "stats": "{\"numRecords\":1000,...}"
+  }
 }
 ```
 
+### Features
+- Full Delta Lake protocol support
+- Transaction log parsing and replay
+- Checkpoint handling
+- Statistics-based file pruning
+- Time range optimization
+- Partition pruning
+
+### Limitations
+- Read-only support (no writes)
+- Basic schema evolution
+- Single-table transactions only
+
 ## Benefits
-- Works with existing hive-partitioned data
+- Works with both Iceberg and Delta Lake formats
 - Provides file pruning based on time ranges
-- Compatible with DuckDB's Iceberg extension
+- Compatible with DuckDB extensions
 - Lightweight metadata management
 - Easy integration with existing systems
-
-## Limitations
-- Basic implementation of Iceberg spec
-- Limited to time-based partitioning
-- Focused on read-only workloads
 
 ## Integration
 
@@ -146,5 +156,6 @@ IceCube integrates with the existing server infrastructure:
 1. The main server initializes both ParquetServer and IceCube API
 2. ParquetServer uses IceCube catalog for file discovery
 3. QueryClient uses IceCube for optimized query planning
+4. Supports both Iceberg and Delta Lake formats transparently
 
 See `server.go`, `parquetServer.go`, and `queryClient.go` for implementation details.
