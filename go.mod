@@ -1,4 +1,4 @@
-module github.com/gigapi/gigapi_querier
+module github.com/gigapi/gigapi-querier
 
 go 1.24.1
 
