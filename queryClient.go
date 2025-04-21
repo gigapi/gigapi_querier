@@ -371,6 +371,11 @@ func (q *QueryClient) findAllFiles(dbName, measurement string) ([]string, error)
 			return nil // Skip errors
 		}
 
+		if info.Name() == "tmp" && info.IsDir() {
+			// Skipping tmp directory as it may include half-created parquet files
+			return filepath.SkipDir
+		}
+
 		if info.IsDir() {
 			if _, err := os.Stat(filepath.Join(path, "metadata.json")); err == nil {
 				metadataBytes, err := os.ReadFile(filepath.Join(path, "metadata.json"))
