@@ -50,8 +50,24 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
+// addCORSHeaders adds CORS headers to the response
+func addCORSHeaders(w http.ResponseWriter) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+}
+
 // handleQuery handles the /query endpoint
 func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
+	// Add CORS headers
+	addCORSHeaders(w)
+
+	// Handle preflight requests
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	// Only allow POST
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -139,6 +155,15 @@ func sendErrorResponse(w http.ResponseWriter, message string, statusCode int) {
 
 // Health check endpoint
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	// Add CORS headers
+	addCORSHeaders(w)
+
+	// Handle preflight requests
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":    "ok",
@@ -148,6 +173,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // handleUI serves the main UI page
 func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
+	// Add CORS headers
+	addCORSHeaders(w)
+
 	// Only allow GET requests
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
