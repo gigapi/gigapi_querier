@@ -171,27 +171,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleUI serves the main UI page
-func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
-	// Add CORS headers
-	addCORSHeaders(w)
-
-	// Only allow GET requests
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Set proper headers
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(uiContent)))
-	
-	// Write the embedded UI content
-	if _, err := w.Write(uiContent); err != nil {
-		log.Printf("Error writing response: %v", err)
-	}
-}
-
 // Close the server and release resources
 func (s *Server) Close() error {
 	return s.QueryClient.Close()
