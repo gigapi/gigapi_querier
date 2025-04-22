@@ -2,6 +2,7 @@
 package main
 
 import (
+        _ "embed"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -11,6 +12,10 @@ import (
 	"strconv"
 	"time"
 )
+
+
+//go:embed ui.html
+var uiContent []byte
 
 // Server represents the API server
 type Server struct {
@@ -142,6 +147,34 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// addCORSHeaders adds CORS headers to the response
+func addCORSHeaders(w http.ResponseWriter) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+}
+
+// handleUI serves the main UI page
+func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
+	// Add CORS headers
+	addCORSHeaders(w)
+
+	// Only allow GET requests
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Set proper headers
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(uiContent)))
+	
+	// Write the embedded UI content
+	if _, err := w.Write(uiContent); err != nil {
+		log.Printf("Error writing response: %v", err)
+	}
+}
+
 // Close the server and release resources
 func (s *Server) Close() error {
 	return s.QueryClient.Close()
@@ -197,6 +230,7 @@ func main() {
 	defer server.Close()
 
 	// Set up routes
+        http.HandleFunc("/", server.handleUI) 
 	http.HandleFunc("/health", server.handleHealth)
 	http.HandleFunc("/query", server.handleQuery)
 
