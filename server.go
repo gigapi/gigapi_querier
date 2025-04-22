@@ -162,8 +162,14 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Set proper headers
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(content)
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(content)))
+	
+	// Write the content
+	if _, err := w.Write(content); err != nil {
+		log.Printf("Error writing response: %v", err)
+	}
 }
 
 // Close the server and release resources
