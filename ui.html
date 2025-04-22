@@ -63,7 +63,7 @@
                 </div>
                 <div class="md:col-span-2">
                     <label for="apiUrl" class="block text-sm font-medium text-gray-700 mb-1">API Endpoint</label>
-                    <input type="text" id="apiUrl" value="http://localhost:7972/query" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 py-2 px-3 border">
+                    <input type="text" id="apiUrl" value="" id=apiUrl class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 py-2 px-3 border">
                 </div>
             </div>
 
@@ -124,6 +124,7 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('apiUrl').value = `${location.protocol}//${location.hostname}${location.port ? ':' + location.port : ''}/query`;
             // Elements
             const databaseSelect = document.getElementById('databaseSelect');
             const queryEditor = document.getElementById('queryEditor');
