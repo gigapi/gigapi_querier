@@ -117,8 +117,15 @@
             </div>
         </div>
 
+        <div class="mt-8 bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">Recent Queries</h2>
+            <div id="queryHistory" class="space-y-2">
+                <!-- Query history items will be inserted here -->
+            </div>
+        </div>
+
         <div class="mt-8 text-center text-sm text-gray-500">
-            <p>SQL Query UI v1.0 | Powered by your API</p>
+            <p>GigAPI UI | Powered by <a href="https://gigapipe.com">Gigapipe</a></p>
         </div>
     </div>
 
@@ -171,6 +178,81 @@
                 rawContent.classList.remove('hidden');
                 resultsContent.classList.add('hidden');
             });
+
+            // Query History Management
+            const MAX_HISTORY_ITEMS = 10;
+            const queryHistory = document.getElementById('queryHistory');
+
+            function loadQueryHistory() {
+                const history = JSON.parse(localStorage.getItem('queryHistory') || '[]');
+                displayQueryHistory(history);
+            }
+
+            function saveQueryToHistory(query, database) {
+                let history = JSON.parse(localStorage.getItem('queryHistory') || '[]');
+                
+                // Add new query to the beginning of the array
+                history.unshift({
+                    query: query,
+                    database: database,
+                    timestamp: new Date().toISOString()
+                });
+
+                // Keep only the last MAX_HISTORY_ITEMS queries
+                history = history.slice(0, MAX_HISTORY_ITEMS);
+
+                // Save to localStorage
+                localStorage.setItem('queryHistory', JSON.stringify(history));
+                
+                // Update display
+                displayQueryHistory(history);
+            }
+
+            function displayQueryHistory(history) {
+                queryHistory.innerHTML = '';
+                
+                if (history.length === 0) {
+                    queryHistory.innerHTML = `
+                        <div class="text-center py-4 text-gray-500">
+                            <p>No recent queries</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                history.forEach((item, index) => {
+                    const date = new Date(item.timestamp);
+                    const formattedDate = date.toLocaleString();
+                    
+                    const historyItem = document.createElement('div');
+                    historyItem.className = 'p-3 bg-gray-50 rounded-md hover:bg-gray-100 cursor-pointer transition-colors';
+                    historyItem.innerHTML = `
+                        <div class="flex justify-between items-start">
+                            <div class="flex-1">
+                                <div class="text-sm font-medium text-gray-700">${item.database}</div>
+                                <div class="text-sm text-gray-600 mt-1 font-mono">${item.query}</div>
+                                <div class="text-xs text-gray-500 mt-1">${formattedDate}</div>
+                            </div>
+                            <button class="ml-2 text-gray-400 hover:text-gray-600" onclick="event.stopPropagation(); loadQueryFromHistory(${index})">
+                                <i class="fas fa-arrow-up"></i>
+                            </button>
+                        </div>
+                    `;
+                    
+                    historyItem.addEventListener('click', () => loadQueryFromHistory(index));
+                    queryHistory.appendChild(historyItem);
+                });
+            }
+
+            function loadQueryFromHistory(index) {
+                const history = JSON.parse(localStorage.getItem('queryHistory') || '[]');
+                const item = history[index];
+                
+                if (item) {
+                    databaseSelect.value = item.database;
+                    queryEditor.value = item.query;
+                }
+            }
 
             // Functions
             function loadDatabases() {
@@ -249,6 +331,9 @@
                 .then(data => {
                     // Hide loading indicator
                     loadingIndicator.classList.add('hidden');
+
+                    // Save successful query to history
+                    saveQueryToHistory(queryText, selectedDb);
 
                     // Show raw JSON
                     rawJson.textContent = JSON.stringify(data, null, 2);
@@ -334,6 +419,9 @@
                 document.getElementById('errorTitle').textContent = title;
                 document.getElementById('errorMessage').textContent = message;
             }
+
+            // Load query history on startup
+            loadQueryHistory();
         });
     </script>
 </body>
