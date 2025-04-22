@@ -3,462 +3,337 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SQL Explorer</title>
+    <title>SQL Query UI</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        .monaco-editor { height: 150px !important; }
-        .chart-container { position: relative; height: 300px; }
-        .resize-handle {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            height: 10px;
-            background: #e5e7eb;
-            cursor: ns-resize;
-            z-index: 10;
+        .monaco-editor {
+            height: 150px;
+            border: 1px solid #e5e7eb;
+            border-radius: 0.375rem;
         }
-        .table-container {
+        .result-table {
             max-height: 400px;
             overflow-y: auto;
         }
-        .table-container table {
-            min-width: 100%;
-        }
-        .table-container th {
-            position: sticky;
-            top: 0;
-            background: white;
-            z-index: 10;
-        }
         .loading-spinner {
-            border: 4px solid rgba(0, 0, 0, 0.1);
-            border-radius: 50%;
-            border-top: 4px solid #3b82f6;
-            width: 30px;
-            height: 30px;
             animation: spin 1s linear infinite;
         }
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
-        .btn-disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
+        .tab-active {
+            border-bottom: 2px solid #3b82f6;
+            color: #3b82f6;
         }
     </style>
 </head>
-<body class="bg-gray-50">
+<body class="bg-gray-50 min-h-screen">
     <div class="container mx-auto px-4 py-8">
-        <header class="mb-8">
-            <div class="flex items-center justify-between">
+        <div class="flex items-center justify-between mb-8">
+            <h1 class="text-3xl font-bold text-gray-800 flex items-center">
+                <i class="fas fa-database mr-3 text-blue-500"></i>
+                SQL Query UI
+            </h1>
+            <div class="flex items-center space-x-4">
+                <button id="executeBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md flex items-center">
+                    <i class="fas fa-play mr-2"></i>
+                    Execute (Ctrl+Enter)
+                </button>
+                <button id="clearBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded-md flex items-center">
+                    <i class="fas fa-trash-alt mr-2"></i>
+                    Clear
+                </button>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow-md p-6 mb-8">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
                 <div>
-                    <h1 class="text-3xl font-bold text-gray-800 flex items-center">
-                        <i class="fas fa-database text-blue-500 mr-3"></i>
-                        SQL Explorer
-                    </h1>
-                    <p class="text-gray-600 mt-2">Query and visualize data with SQL</p>
-                </div>
-            </div>
-        </header>
-
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-            <div class="bg-white rounded-xl shadow-md p-6 lg:col-span-2">
-                <div class="flex justify-between items-center mb-4">
-                    <h2 class="text-xl font-semibold text-gray-800">
-                        <i class="fas fa-terminal text-blue-500 mr-2"></i> SQL Editor
-                    </h2>
-                    <div class="flex space-x-2">
-                        <button id="run-query" class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg flex items-center">
-                            <i class="fas fa-play mr-2"></i> Run Query
-                        </button>
-                        <button id="clear-query" class="bg-gray-200 hover:bg-gray-300 text-gray-800 px-4 py-2 rounded-lg">
-                            <i class="fas fa-trash-alt mr-2"></i> Clear
+                    <label for="databaseSelect" class="block text-sm font-medium text-gray-700 mb-1">Database</label>
+                    <div class="flex">
+                        <select id="databaseSelect" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 py-2 px-3 border">
+                            <option value="">Loading databases...</option>
+                        </select>
+                        <button id="refreshDbBtn" class="ml-2 bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 rounded-md">
+                            <i class="fas fa-sync-alt"></i>
                         </button>
                     </div>
                 </div>
-                <div class="relative">
-                    <textarea id="sql-editor" class="w-full h-40 p-4 border border-gray-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="SELECT * FROM ..."></textarea>
-                    <div class="absolute bottom-2 right-2 bg-gray-100 px-2 py-1 rounded text-xs text-gray-500">
-                        <span id="row-count">0</span> rows
-                    </div>
+                <div class="md:col-span-2">
+                    <label for="apiUrl" class="block text-sm font-medium text-gray-700 mb-1">API Endpoint</label>
+                    <input type="text" id="apiUrl" value="http://localhost:7972/query" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 py-2 px-3 border">
                 </div>
             </div>
 
-            <div class="bg-white rounded-xl shadow-md p-6">
-                <h2 class="text-xl font-semibold text-gray-800 mb-4">
-                    <i class="fas fa-info-circle text-blue-500 mr-2"></i> Database Info
-                </h2>
-                <div id="db-info" class="space-y-3">
-                    <div class="flex items-center justify-between">
-                        <span class="text-gray-600">Status:</span>
-                        <span id="db-status" class="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">Connected</span>
+            <div class="mb-4">
+                <label for="queryEditor" class="block text-sm font-medium text-gray-700 mb-1">SQL Query</label>
+                <textarea id="queryEditor" class="w-full h-40 p-3 border border-gray-300 rounded-md font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="Enter your SQL query here..."></textarea>
+            </div>
+
+            <div class="flex items-center text-sm text-gray-500">
+                <i class="fas fa-info-circle mr-2"></i>
+                Press Ctrl+Enter to execute your query
+            </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <div class="flex border-b mb-4">
+                <button id="resultsTab" class="px-4 py-2 font-medium tab-active">Results</button>
+                <button id="rawTab" class="px-4 py-2 font-medium text-gray-500">Raw JSON</button>
+            </div>
+
+            <div id="resultsContent" class="result-table">
+                <div class="text-center py-8 text-gray-500">
+                    <i class="fas fa-database text-4xl mb-2"></i>
+                    <p>Execute a query to see results</p>
+                </div>
+            </div>
+
+            <div id="rawContent" class="hidden">
+                <pre class="bg-gray-100 p-4 rounded-md text-sm overflow-x-auto"><code id="rawJson">No data yet</code></pre>
+            </div>
+
+            <div id="loadingIndicator" class="hidden text-center py-4">
+                <div class="inline-block loading-spinner text-blue-500">
+                    <i class="fas fa-circle-notch text-2xl"></i>
+                </div>
+                <p class="mt-2 text-gray-600">Executing query...</p>
+            </div>
+
+            <div id="errorContainer" class="hidden bg-red-50 border-l-4 border-red-500 p-4 mt-4">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <i class="fas fa-exclamation-circle text-red-500"></i>
+                    </div>
+                    <div class="ml-3">
+                        <h3 class="text-sm font-medium text-red-800" id="errorTitle">Error</h3>
+                        <div class="mt-2 text-sm text-red-700">
+                            <p id="errorMessage"></p>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <div class="bg-white rounded-xl shadow-md p-6 mb-6">
-            <div class="flex justify-between items-center mb-4">
-                <h2 class="text-xl font-semibold text-gray-800">
-                    <i class="fas fa-chart-bar text-blue-500 mr-2"></i> Visualization
-                </h2>
-                <div class="flex space-x-2">
-                    <select id="chart-type" class="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                        <option value="table">Table</option>
-                        <option value="bar">Bar Chart</option>
-                        <option value="line">Line Chart</option>
-                        <option value="pie">Pie Chart</option>
-                        <option value="scatter">Scatter Plot</option>
-                    </select>
-                    <button id="export-csv" class="bg-gray-200 hover:bg-gray-300 text-gray-800 px-4 py-2 rounded-lg flex items-center">
-                        <i class="fas fa-file-csv mr-2"></i> Export CSV
-                    </button>
-                </div>
-            </div>
-            
-            <div id="results-container">
-                <div id="loading-indicator" class="hidden flex justify-center items-center py-12">
-                    <div class="loading-spinner"></div>
-                    <span class="ml-3 text-gray-600">Executing query...</span>
-                </div>
-                
-                <div id="results-content" class="hidden">
-                    <div id="chart-area" class="mb-6">
-                        <div class="chart-container">
-                            <canvas id="result-chart"></canvas>
-                        </div>
-                    </div>
-                    
-                    <div id="table-area">
-                        <div class="table-container border border-gray-200 rounded-lg">
-                            <table id="result-table" class="w-full divide-y divide-gray-200">
-                                <thead class="bg-gray-50">
-                                    <tr id="table-headers"></tr>
-                                </thead>
-                                <tbody id="table-body" class="bg-white divide-y divide-gray-200"></tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-                
-                <div id="empty-state" class="text-center py-12">
-                    <i class="fas fa-search text-gray-300 text-5xl mb-4"></i>
-                    <h3 class="text-lg font-medium text-gray-500">No results to display</h3>
-                    <p class="text-gray-400 mt-1">Run a query to see results here</p>
-                </div>
-            </div>
-        </div>
-
-        <div class="bg-white rounded-xl shadow-md p-6">
-            <h2 class="text-xl font-semibold text-gray-800 mb-4">
-                <i class="fas fa-history text-blue-500 mr-2"></i> Query History
-            </h2>
-            <div id="query-history" class="space-y-2 max-h-40 overflow-y-auto">
-                <div class="text-gray-500 italic">No queries executed yet</div>
-            </div>
+        <div class="mt-8 text-center text-sm text-gray-500">
+            <p>SQL Query UI v1.0 | Powered by your API</p>
         </div>
     </div>
 
     <script>
-        let currentChart = null;
-        let queryHistory = [];
-        
-        // Initialize the application
-        document.addEventListener('DOMContentLoaded', () => {
-            setupEventListeners();
-        });
+        document.addEventListener('DOMContentLoaded', function() {
+            // Elements
+            const databaseSelect = document.getElementById('databaseSelect');
+            const queryEditor = document.getElementById('queryEditor');
+            const executeBtn = document.getElementById('executeBtn');
+            const clearBtn = document.getElementById('clearBtn');
+            const refreshDbBtn = document.getElementById('refreshDbBtn');
+            const apiUrl = document.getElementById('apiUrl');
+            const resultsContent = document.getElementById('resultsContent');
+            const rawContent = document.getElementById('rawContent');
+            const rawJson = document.getElementById('rawJson');
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            const errorContainer = document.getElementById('errorContainer');
+            const resultsTab = document.getElementById('resultsTab');
+            const rawTab = document.getElementById('rawTab');
 
-        // Set up event listeners
-        function setupEventListeners() {
-            document.getElementById('run-query').addEventListener('click', executeQuery);
-            document.getElementById('clear-query').addEventListener('click', clearQuery);
-            document.getElementById('chart-type').addEventListener('change', updateVisualization);
-            document.getElementById('export-csv').addEventListener('click', exportToCSV);
-            
-            // Set up SQL editor
-            const sqlEditor = document.getElementById('sql-editor');
-            sqlEditor.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' && e.ctrlKey) {
+            // Load databases on startup
+            loadDatabases();
+
+            // Event listeners
+            executeBtn.addEventListener('click', executeQuery);
+            clearBtn.addEventListener('click', clearQuery);
+            refreshDbBtn.addEventListener('click', loadDatabases);
+            queryEditor.addEventListener('keydown', function(e) {
+                if (e.ctrlKey && e.key === 'Enter') {
                     executeQuery();
                 }
             });
-        }
 
-        // Execute SQL query
-        async function executeQuery() {
-            const sqlEditor = document.getElementById('sql-editor');
-            const query = sqlEditor.value.trim();
-            
-            if (!query) {
-                alert('Please enter a SQL query');
-                return;
-            }
-            
-            try {
-                // Show loading indicator
-                document.getElementById('loading-indicator').classList.remove('hidden');
-                document.getElementById('results-content').classList.add('hidden');
-                document.getElementById('empty-state').classList.add('hidden');
+            // Tab switching
+            resultsTab.addEventListener('click', function() {
+                resultsTab.classList.add('tab-active');
+                resultsTab.classList.remove('text-gray-500');
+                rawTab.classList.remove('tab-active');
+                rawTab.classList.add('text-gray-500');
+                resultsContent.classList.remove('hidden');
+                rawContent.classList.add('hidden');
+            });
+
+            rawTab.addEventListener('click', function() {
+                rawTab.classList.add('tab-active');
+                rawTab.classList.remove('text-gray-500');
+                resultsTab.classList.remove('tab-active');
+                resultsTab.classList.add('text-gray-500');
+                rawContent.classList.remove('hidden');
+                resultsContent.classList.add('hidden');
+            });
+
+            // Functions
+            function loadDatabases() {
+                databaseSelect.innerHTML = '<option value="">Loading databases...</option>';
                 
-                // Execute query via API
-                const response = await fetch('/query?db=mydb', {
+                const query = {
+                    query: "SHOW DATABASES"
+                };
+
+                fetch(apiUrl.value, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ query })
+                    body: JSON.stringify(query)
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.results && data.results.length > 0) {
+                        databaseSelect.innerHTML = '';
+                        data.results.forEach(db => {
+                            const option = document.createElement('option');
+                            option.value = db.database_name;
+                            option.textContent = db.database_name;
+                            databaseSelect.appendChild(option);
+                        });
+                    } else {
+                        databaseSelect.innerHTML = '<option value="">No databases found</option>';
+                    }
+                })
+                .catch(error => {
+                    databaseSelect.innerHTML = '<option value="">Error loading databases</option>';
+                    showError('Failed to load databases', error.message);
                 });
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const result = await response.json();
-                
-                // Add to query history
-                addToQueryHistory(query);
-                
-                // Display results
-                displayResults(result.results);
-                
-                // Update row count
-                document.getElementById('row-count').textContent = result.results.length;
-                
-            } catch (error) {
-                console.error('Error executing query:', error);
-                alert(`Query error: ${error.message}`);
-            } finally {
-                document.getElementById('loading-indicator').classList.add('hidden');
             }
-        }
 
-        // Display query results
-        function displayResults(data) {
-            // Show results container
-            document.getElementById('results-content').classList.remove('hidden');
-            document.getElementById('empty-state').classList.add('hidden');
-            
-            // Get column names from first row
-            const columns = data.length > 0 ? Object.keys(data[0]) : [];
-            
-            // Display as table first
-            renderTable(data, columns);
-            
-            // Then render chart based on current selection
-            updateVisualization();
-        }
+            function executeQuery() {
+                const selectedDb = databaseSelect.value;
+                const queryText = queryEditor.value.trim();
 
-        // Render results as table
-        function renderTable(data, columns) {
-            const tableHead = document.getElementById('table-headers');
-            const tableBody = document.getElementById('table-body');
-            
-            // Clear existing content
-            tableHead.innerHTML = '';
-            tableBody.innerHTML = '';
-            
-            // Create table headers
-            columns.forEach(col => {
-                const th = document.createElement('th');
-                th.className = 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider';
-                th.textContent = col;
-                tableHead.appendChild(th);
-            });
-            
-            // Create table rows
-            data.forEach(row => {
-                const tr = document.createElement('tr');
-                columns.forEach(col => {
-                    const td = document.createElement('td');
-                    td.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-500';
-                    td.textContent = row[col] !== null ? row[col].toString() : 'NULL';
-                    tr.appendChild(td);
-                });
-                tableBody.appendChild(tr);
-            });
-        }
+                if (!selectedDb) {
+                    showError('Database Required', 'Please select a database first');
+                    return;
+                }
 
-        // Update visualization based on selected type
-        function updateVisualization() {
-            const chartType = document.getElementById('chart-type').value;
-            const tableBody = document.getElementById('table-body');
-            const rows = tableBody.querySelectorAll('tr');
-            
-            if (rows.length === 0 || chartType === 'table') {
-                document.getElementById('chart-area').classList.add('hidden');
-                document.getElementById('table-area').classList.remove('hidden');
-                return;
-            }
-            
-            document.getElementById('chart-area').classList.remove('hidden');
-            document.getElementById('table-area').classList.add('hidden');
-            
-            // Get data from table
-            const headers = Array.from(document.getElementById('table-headers').children).map(th => th.textContent);
-            const data = Array.from(rows).map(row => {
-                return Array.from(row.children).map(cell => cell.textContent);
-            });
-            
-            // Prepare chart data
-            const chartData = {
-                labels: data.map(row => row[0]), // First column as labels
-                datasets: []
-            };
-            
-            // For bar, line, pie charts - use first two columns
-            if (chartType === 'bar' || chartType === 'line' || chartType === 'pie') {
-                if (headers.length >= 2) {
-                    chartData.datasets.push({
-                        label: headers[1],
-                        data: data.map(row => parseFloat(row[1]) || 0),
-                        backgroundColor: getRandomColors(data.length),
-                        borderColor: '#3b82f6',
-                        borderWidth: 1
-                    });
+                if (!queryText) {
+                    showError('Query Required', 'Please enter a SQL query');
+                    return;
                 }
-            }
-            
-            // For scatter plot - use first two numeric columns
-            if (chartType === 'scatter') {
-                if (headers.length >= 2) {
-                    chartData.datasets.push({
-                        label: `${headers[0]} vs ${headers[1]}`,
-                        data: data.map(row => ({
-                            x: parseFloat(row[0]) || 0,
-                            y: parseFloat(row[1]) || 0
-                        })),
-                        backgroundColor: '#3b82f6',
-                        borderColor: '#2563eb',
-                        borderWidth: 1,
-                        pointRadius: 6
-                    });
-                }
-            }
-            
-            // Destroy previous chart if exists
-            if (currentChart) {
-                currentChart.destroy();
-            }
-            
-            // Create new chart
-            const ctx = document.getElementById('result-chart').getContext('2d');
-            
-            const chartConfig = {
-                type: chartType,
-                data: chartData,
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'top',
-                        },
-                        tooltip: {
-                            mode: chartType === 'scatter' ? 'nearest' : 'index',
-                            intersect: false
-                        }
+
+                // Show loading indicator
+                loadingIndicator.classList.remove('hidden');
+                errorContainer.classList.add('hidden');
+                resultsContent.innerHTML = '';
+                rawJson.textContent = '';
+
+                const query = {
+                    query: queryText
+                };
+
+                const url = `${apiUrl.value}?db=${encodeURIComponent(selectedDb)}`;
+
+                fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
                     },
-                    scales: chartType === 'scatter' ? {
-                        x: {
-                            type: 'linear',
-                            position: 'bottom'
-                        }
-                    } : {}
-                }
-            };
-            
-            currentChart = new Chart(ctx, chartConfig);
-        }
+                    body: JSON.stringify(query)
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    // Hide loading indicator
+                    loadingIndicator.classList.add('hidden');
 
-        // Add query to history
-        function addToQueryHistory(query) {
-            queryHistory.unshift({
-                query: query,
-                timestamp: new Date().toLocaleTimeString()
-            });
-            
-            // Keep only last 10 queries
-            if (queryHistory.length > 10) {
-                queryHistory.pop();
+                    // Show raw JSON
+                    rawJson.textContent = JSON.stringify(data, null, 2);
+
+                    // Process and display results
+                    if (data.results && data.results.length > 0) {
+                        displayResults(data.results);
+                    } else {
+                        resultsContent.innerHTML = `
+                            <div class="text-center py-8 text-gray-500">
+                                <i class="fas fa-check-circle text-4xl mb-2 text-green-500"></i>
+                                <p>Query executed successfully</p>
+                                <p class="text-sm mt-2">No results returned</p>
+                            </div>
+                        `;
+                    }
+                })
+                .catch(error => {
+                    loadingIndicator.classList.add('hidden');
+                    showError('Query Execution Failed', error.message);
+                });
             }
-            
-            // Update UI
-            const historyContainer = document.getElementById('query-history');
-            historyContainer.innerHTML = '';
-            
-            if (queryHistory.length === 0) {
-                historyContainer.innerHTML = '<div class="text-gray-500 italic">No queries executed yet</div>';
-                return;
-            }
-            
-            queryHistory.forEach((item, index) => {
-                const div = document.createElement('div');
-                div.className = 'bg-gray-50 p-3 rounded-lg cursor-pointer hover:bg-gray-100';
-                div.innerHTML = `
-                    <div class="flex justify-between items-start">
-                        <div class="text-sm font-mono truncate flex-1 mr-2">${item.query}</div>
-                        <span class="text-xs text-gray-400">${item.timestamp}</span>
+
+            function displayResults(results) {
+                // Get all unique keys from the results
+                const keys = new Set();
+                results.forEach(row => {
+                    Object.keys(row).forEach(key => keys.add(key));
+                });
+                const keyArray = Array.from(keys);
+
+                // Create table
+                let tableHtml = `
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    ${keyArray.map(key => `<th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${key}</th>`).join('')}
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                `;
+
+                // Add rows
+                results.forEach((row, rowIndex) => {
+                    const rowClass = rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50';
+                    tableHtml += `<tr class="${rowClass}">`;
+                    
+                    keyArray.forEach(key => {
+                        const value = row[key] !== undefined ? row[key] : 'NULL';
+                        tableHtml += `<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${value}</td>`;
+                    });
+                    
+                    tableHtml += '</tr>';
+                });
+
+                tableHtml += `
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="mt-2 text-sm text-gray-500">
+                        ${results.length} row${results.length !== 1 ? 's' : ''} returned
                     </div>
                 `;
-                
-                div.addEventListener('click', () => {
-                    document.getElementById('sql-editor').value = item.query;
-                });
-                
-                historyContainer.appendChild(div);
-            });
-        }
 
-        // Clear query editor
-        function clearQuery() {
-            document.getElementById('sql-editor').value = '';
-        }
-
-        // Export results to CSV
-        function exportToCSV() {
-            const tableBody = document.getElementById('table-body');
-            const rows = tableBody.querySelectorAll('tr');
-            
-            if (rows.length === 0) {
-                alert('No data to export');
-                return;
+                resultsContent.innerHTML = tableHtml;
             }
-            
-            const headers = Array.from(document.getElementById('table-headers').children).map(th => th.textContent);
-            const data = Array.from(rows).map(row => {
-                return Array.from(row.children).map(cell => cell.textContent);
-            });
-            
-            // Create CSV content
-            let csvContent = headers.join(',') + '\n';
-            data.forEach(row => {
-                csvContent += row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(',') + '\n';
-            });
-            
-            // Create download link
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.setAttribute('href', url);
-            link.setAttribute('download', 'query_results.csv');
-            link.style.visibility = 'hidden';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-        }
 
-        // Helper function to generate random colors for charts
-        function getRandomColors(count) {
-            const colors = [];
-            for (let i = 0; i < count; i++) {
-                colors.push(`hsl(${Math.floor(Math.random() * 360)}, 70%, 60%)`);
+            function clearQuery() {
+                queryEditor.value = '';
+                resultsContent.innerHTML = `
+                    <div class="text-center py-8 text-gray-500">
+                        <i class="fas fa-database text-4xl mb-2"></i>
+                        <p>Execute a query to see results</p>
+                    </div>
+                `;
+                rawJson.textContent = 'No data yet';
+                errorContainer.classList.add('hidden');
             }
-            return colors;
-        }
+
+            function showError(title, message) {
+                errorContainer.classList.remove('hidden');
+                document.getElementById('errorTitle').textContent = title;
+                document.getElementById('errorMessage').textContent = message;
+            }
+        });
     </script>
 </body>
 </html>
