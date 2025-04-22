@@ -7,109 +7,193 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
+        :root {
+            --bg-dark: #1a1725;
+            --bg-darker: #13111d;
+            --bg-purple: #2d2b3d;
+            --accent-purple: #7c3aed;
+            --text-light: #e5e7eb;
+            --text-gray: #9ca3af;
+            --border-dark: #2d2b3d;
+        }
+
+        body {
+            background-color: var(--bg-darker);
+            color: var(--text-light);
+        }
+
         .monaco-editor {
             height: 150px;
-            border: 1px solid #e5e7eb;
+            border: 1px solid var(--border-dark);
             border-radius: 0.375rem;
+            background-color: var(--bg-dark);
         }
+
         .result-table {
             max-height: 400px;
             overflow-y: auto;
+            background-color: var(--bg-darker);
         }
+
         .loading-spinner {
             animation: spin 1s linear infinite;
         }
+
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+
         .tab-active {
-            border-bottom: 2px solid #3b82f6;
-            color: #3b82f6;
+            border-bottom: 2px solid var(--accent-purple);
+            color: var(--accent-purple);
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-dark);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--bg-purple);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--accent-purple);
+        }
+
+        /* Table styles */
+        table {
+            border-collapse: separate;
+            border-spacing: 0;
+        }
+
+        th {
+            background-color: var(--bg-dark);
+            border-bottom: 1px solid var(--border-dark);
+            color: var(--text-gray);
+            font-weight: 500;
+            padding: 0.75rem 1rem;
+            text-align: left;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+        }
+
+        td {
+            border-bottom: 1px solid var(--border-dark);
+            padding: 0.75rem 1rem;
+            color: var(--text-light);
+            background-color: var(--bg-darker);
+        }
+
+        tr:hover td {
+            background-color: var(--bg-purple);
+        }
+
+        /* Query history item styles */
+        #queryHistory > div {
+            background-color: var(--bg-darker);
+            border: 1px solid var(--border-dark);
+        }
+
+        #queryHistory > div:hover {
+            background-color: var(--bg-purple);
+        }
+
+        /* Raw JSON styles */
+        #rawJson {
+            background-color: var(--bg-darker);
+            color: var(--text-light);
         }
     </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
+<body class="min-h-screen">
     <div class="container mx-auto px-4 py-8">
         <div class="flex items-center justify-between mb-8">
-            <h1 class="text-3xl font-bold text-gray-800 flex items-center">
-                <i class="fas fa-database mr-3 text-blue-500"></i>
+            <h1 class="text-3xl font-bold text-gray-100 flex items-center">
+                <i class="fas fa-database mr-3 text-purple-500"></i>
                 GigAPI Query UI
             </h1>
             <div class="flex items-center space-x-4">
-                <button id="executeBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md flex items-center">
+                <button id="executeBtn" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md flex items-center">
                     <i class="fas fa-play mr-2"></i>
                     Execute (Ctrl+Enter)
                 </button>
-                <button id="clearBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded-md flex items-center">
+                <button id="clearBtn" class="bg-gray-700 hover:bg-gray-600 text-gray-200 px-4 py-2 rounded-md flex items-center">
                     <i class="fas fa-trash-alt mr-2"></i>
                     Clear
                 </button>
             </div>
         </div>
 
-        <div class="bg-white rounded-lg shadow-md p-6 mb-8">
+        <div class="bg-[#1a1725] rounded-lg shadow-xl p-6 mb-8 border border-[#2d2b3d]">
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
                 <div>
-                    <label for="databaseSelect" class="block text-sm font-medium text-gray-700 mb-1">Database</label>
+                    <label for="databaseSelect" class="block text-sm font-medium text-gray-300 mb-1">Database</label>
                     <div class="flex">
-                        <select id="databaseSelect" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 py-2 px-3 border">
+                        <select id="databaseSelect" class="block w-full rounded-md border-gray-700 bg-[#13111d] text-gray-200 shadow-sm focus:border-purple-500 focus:ring-purple-500 py-2 px-3">
                             <option value="">Loading databases...</option>
                         </select>
-                        <button id="refreshDbBtn" class="ml-2 bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 rounded-md">
+                        <button id="refreshDbBtn" class="ml-2 bg-gray-700 hover:bg-gray-600 text-gray-200 px-3 rounded-md">
                             <i class="fas fa-sync-alt"></i>
                         </button>
                     </div>
                 </div>
                 <div class="md:col-span-2">
-                    <label for="apiUrl" class="block text-sm font-medium text-gray-700 mb-1">API Endpoint</label>
-                    <input type="text" id="apiUrl" value="" id=apiUrl class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 py-2 px-3 border">
+                    <label for="apiUrl" class="block text-sm font-medium text-gray-300 mb-1">API Endpoint</label>
+                    <input type="text" id="apiUrl" class="block w-full rounded-md border-gray-700 bg-[#13111d] text-gray-200 shadow-sm focus:border-purple-500 focus:ring-purple-500 py-2 px-3">
                 </div>
             </div>
 
             <div class="mb-4">
-                <label for="queryEditor" class="block text-sm font-medium text-gray-700 mb-1">SQL Query</label>
-                <textarea id="queryEditor" class="w-full h-40 p-3 border border-gray-300 rounded-md font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="Enter your SQL query here..."></textarea>
+                <label for="queryEditor" class="block text-sm font-medium text-gray-300 mb-1">SQL Query</label>
+                <textarea id="queryEditor" class="w-full h-40 p-3 bg-[#13111d] border border-gray-700 rounded-md font-mono text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500" placeholder="Enter your SQL query here..."></textarea>
             </div>
 
-            <div class="flex items-center text-sm text-gray-500">
+            <div class="flex items-center text-sm text-gray-400">
                 <i class="fas fa-info-circle mr-2"></i>
                 Press Ctrl+Enter to execute your query
             </div>
         </div>
 
-        <div class="bg-white rounded-lg shadow-md p-6">
-            <div class="flex border-b mb-4">
+        <div class="bg-[#1a1725] rounded-lg shadow-xl p-6 border border-[#2d2b3d]">
+            <div class="flex border-b border-gray-700 mb-4">
                 <button id="resultsTab" class="px-4 py-2 font-medium tab-active">Results</button>
-                <button id="rawTab" class="px-4 py-2 font-medium text-gray-500">Raw JSON</button>
+                <button id="rawTab" class="px-4 py-2 font-medium text-gray-400">Raw JSON</button>
             </div>
 
             <div id="resultsContent" class="result-table">
-                <div class="text-center py-8 text-gray-500">
+                <div class="text-center py-8 text-gray-400">
                     <i class="fas fa-database text-4xl mb-2"></i>
                     <p>Execute a query to see results</p>
                 </div>
             </div>
 
             <div id="rawContent" class="hidden">
-                <pre class="bg-gray-100 p-4 rounded-md text-sm overflow-x-auto"><code id="rawJson">No data yet</code></pre>
+                <pre class="bg-[#13111d] p-4 rounded-md text-sm overflow-x-auto text-gray-300"><code id="rawJson">No data yet</code></pre>
             </div>
 
             <div id="loadingIndicator" class="hidden text-center py-4">
-                <div class="inline-block loading-spinner text-blue-500">
+                <div class="inline-block loading-spinner text-purple-500">
                     <i class="fas fa-circle-notch text-2xl"></i>
                 </div>
-                <p class="mt-2 text-gray-600">Executing query...</p>
+                <p class="mt-2 text-gray-400">Executing query...</p>
             </div>
 
-            <div id="errorContainer" class="hidden bg-red-50 border-l-4 border-red-500 p-4 mt-4">
+            <div id="errorContainer" class="hidden bg-red-900/20 border-l-4 border-red-500 p-4 mt-4">
                 <div class="flex">
                     <div class="flex-shrink-0">
                         <i class="fas fa-exclamation-circle text-red-500"></i>
                     </div>
                     <div class="ml-3">
-                        <h3 class="text-sm font-medium text-red-800" id="errorTitle">Error</h3>
-                        <div class="mt-2 text-sm text-red-700">
+                        <h3 class="text-sm font-medium text-red-400" id="errorTitle">Error</h3>
+                        <div class="mt-2 text-sm text-red-300">
                             <p id="errorMessage"></p>
                         </div>
                     </div>
@@ -117,15 +201,16 @@
             </div>
         </div>
 
-        <div class="mt-8 bg-white rounded-lg shadow-md p-6">
-            <h2 class="text-xl font-semibold text-gray-800 mb-4">Recent Queries</h2>
+        <!-- Query History Section -->
+        <div class="mt-8 bg-[#1a1725] rounded-lg shadow-xl p-6 border border-[#2d2b3d]">
+            <h2 class="text-xl font-semibold text-gray-100 mb-4">Recent Queries</h2>
             <div id="queryHistory" class="space-y-2">
                 <!-- Query history items will be inserted here -->
             </div>
         </div>
 
         <div class="mt-8 text-center text-sm text-gray-500">
-            <p>GigAPI UI | Powered by <a href="https://gigapipe.com">Gigapipe</a></p>
+            <p>GigAPI UI | Powered by <a href="https://gigapipe.com" class="text-purple-400 hover:text-purple-300">Gigapipe</a></p>
         </div>
     </div>
 
@@ -150,6 +235,11 @@
             // Load databases on startup
             loadDatabases();
 
+            // Load initial state from URL parameters
+            const urlParams = new URLSearchParams(window.location.search);
+            const initialDb = urlParams.get('db');
+            const initialQuery = urlParams.get('query');
+
             // Event listeners
             executeBtn.addEventListener('click', executeQuery);
             clearBtn.addEventListener('click', clearQuery);
@@ -163,18 +253,18 @@
             // Tab switching
             resultsTab.addEventListener('click', function() {
                 resultsTab.classList.add('tab-active');
-                resultsTab.classList.remove('text-gray-500');
+                resultsTab.classList.remove('text-gray-400');
                 rawTab.classList.remove('tab-active');
-                rawTab.classList.add('text-gray-500');
+                rawTab.classList.add('text-gray-400');
                 resultsContent.classList.remove('hidden');
                 rawContent.classList.add('hidden');
             });
 
             rawTab.addEventListener('click', function() {
                 rawTab.classList.add('tab-active');
-                rawTab.classList.remove('text-gray-500');
+                rawTab.classList.remove('text-gray-400');
                 resultsTab.classList.remove('tab-active');
-                resultsTab.classList.add('text-gray-500');
+                resultsTab.classList.add('text-gray-400');
                 rawContent.classList.remove('hidden');
                 resultsContent.classList.add('hidden');
             });
@@ -279,6 +369,11 @@
                             option.textContent = db.database_name;
                             databaseSelect.appendChild(option);
                         });
+
+                        // Set initial database if provided in URL
+                        if (initialDb) {
+                            databaseSelect.value = initialDb;
+                        }
                     } else {
                         databaseSelect.innerHTML = '<option value="">No databases found</option>';
                     }
@@ -334,6 +429,12 @@
 
                     // Save successful query to history
                     saveQueryToHistory(queryText, selectedDb);
+
+                    // Update URL with current query and database
+                    const newUrl = new URL(window.location.href);
+                    newUrl.searchParams.set('db', selectedDb);
+                    newUrl.searchParams.set('query', queryText);
+                    window.history.replaceState({}, '', newUrl);
 
                     // Show raw JSON
                     rawJson.textContent = JSON.stringify(data, null, 2);
@@ -412,12 +513,23 @@
                 `;
                 rawJson.textContent = 'No data yet';
                 errorContainer.classList.add('hidden');
+
+                // Clear URL parameters
+                const newUrl = new URL(window.location.href);
+                newUrl.searchParams.delete('db');
+                newUrl.searchParams.delete('query');
+                window.history.replaceState({}, '', newUrl);
             }
 
             function showError(title, message) {
                 errorContainer.classList.remove('hidden');
                 document.getElementById('errorTitle').textContent = title;
                 document.getElementById('errorMessage').textContent = message;
+            }
+
+            // Set initial query if provided in URL
+            if (initialQuery) {
+                queryEditor.value = decodeURIComponent(initialQuery);
             }
 
             // Load query history on startup
