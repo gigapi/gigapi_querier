@@ -2,6 +2,7 @@
 package main
 
 import (
+	"embed"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -11,6 +12,9 @@ import (
 	"strconv"
 	"time"
 )
+
+//go:embed ui.html
+var uiContent embed.FS
 
 // Server represents the API server
 type Server struct {
@@ -150,8 +154,16 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Serve the UI HTML file
-	http.ServeFile(w, r, "ui.html")
+	// Serve the embedded UI HTML file
+	content, err := uiContent.ReadFile("ui.html")
+	if err != nil {
+		log.Printf("Error reading UI file: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html")
+	w.Write(content)
 }
 
 // Close the server and release resources
