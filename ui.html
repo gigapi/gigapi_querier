@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GigAPI Query UI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .monaco-editor {
+            height: 150px;
+            border: 1px solid #e5e7eb;
+            border-radius: 0.375rem;
+        }
+        .result-table {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .loading-spinner {
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .tab-active {
+            border-bottom: 2px solid #3b82f6;
+            color: #3b82f6;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <div class="flex items-center justify-between mb-8">
+            <h1 class="text-3xl font-bold text-gray-800 flex items-center">
+                <i class="fas fa-database mr-3 text-blue-500"></i>
+                GigAPI Query UI
+            </h1>
+            <div class="flex items-center space-x-4">
+                <button id="executeBtn" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md flex items-center">
+                    <i class="fas fa-play mr-2"></i>
+                    Execute (Ctrl+Enter)
+                </button>
+                <button id="clearBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded-md flex items-center">
+                    <i class="fas fa-trash-alt mr-2"></i>
+                    Clear
+                </button>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow-md p-6 mb-8">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                <div>
+                    <label for="databaseSelect" class="block text-sm font-medium text-gray-700 mb-1">Database</label>
+                    <div class="flex">
+                        <select id="databaseSelect" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 py-2 px-3 border">
+                            <option value="">Loading databases...</option>
+                        </select>
+                        <button id="refreshDbBtn" class="ml-2 bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 rounded-md">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="md:col-span-2">
+                    <label for="apiUrl" class="block text-sm font-medium text-gray-700 mb-1">API Endpoint</label>
+                    <input type="text" id="apiUrl" value="" id=apiUrl class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 py-2 px-3 border">
+                </div>
+            </div>
+
+            <div class="mb-4">
+                <label for="queryEditor" class="block text-sm font-medium text-gray-700 mb-1">SQL Query</label>
+                <textarea id="queryEditor" class="w-full h-40 p-3 border border-gray-300 rounded-md font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="Enter your SQL query here..."></textarea>
+            </div>
+
+            <div class="flex items-center text-sm text-gray-500">
+                <i class="fas fa-info-circle mr-2"></i>
+                Press Ctrl+Enter to execute your query
+            </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <div class="flex border-b mb-4">
+                <button id="resultsTab" class="px-4 py-2 font-medium tab-active">Results</button>
+                <button id="rawTab" class="px-4 py-2 font-medium text-gray-500">Raw JSON</button>
+            </div>
+
+            <div id="resultsContent" class="result-table">
+                <div class="text-center py-8 text-gray-500">
+                    <i class="fas fa-database text-4xl mb-2"></i>
+                    <p>Execute a query to see results</p>
+                </div>
+            </div>
+
+            <div id="rawContent" class="hidden">
+                <pre class="bg-gray-100 p-4 rounded-md text-sm overflow-x-auto"><code id="rawJson">No data yet</code></pre>
+            </div>
+
+            <div id="loadingIndicator" class="hidden text-center py-4">
+                <div class="inline-block loading-spinner text-blue-500">
+                    <i class="fas fa-circle-notch text-2xl"></i>
+                </div>
+                <p class="mt-2 text-gray-600">Executing query...</p>
+            </div>
+
+            <div id="errorContainer" class="hidden bg-red-50 border-l-4 border-red-500 p-4 mt-4">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <i class="fas fa-exclamation-circle text-red-500"></i>
+                    </div>
+                    <div class="ml-3">
+                        <h3 class="text-sm font-medium text-red-800" id="errorTitle">Error</h3>
+                        <div class="mt-2 text-sm text-red-700">
+                            <p id="errorMessage"></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-8 bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">Recent Queries</h2>
+            <div id="queryHistory" class="space-y-2">
+                <!-- Query history items will be inserted here -->
+            </div>
+        </div>
+
+        <div class="mt-8 text-center text-sm text-gray-500">
+            <p>GigAPI UI | Powered by <a href="https://gigapipe.com">Gigapipe</a></p>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('apiUrl').value = `${location.protocol}//${location.hostname}${location.port ? ':' + location.port : ''}/query`;
+            // Elements
+            const databaseSelect = document.getElementById('databaseSelect');
+            const queryEditor = document.getElementById('queryEditor');
+            const executeBtn = document.getElementById('executeBtn');
+            const clearBtn = document.getElementById('clearBtn');
+            const refreshDbBtn = document.getElementById('refreshDbBtn');
+            const apiUrl = document.getElementById('apiUrl');
+            const resultsContent = document.getElementById('resultsContent');
+            const rawContent = document.getElementById('rawContent');
+            const rawJson = document.getElementById('rawJson');
+            const loadingIndicator = document.getElementById('loadingIndicator');
+            const errorContainer = document.getElementById('errorContainer');
+            const resultsTab = document.getElementById('resultsTab');
+            const rawTab = document.getElementById('rawTab');
+
+            // Load databases on startup
+            loadDatabases();
+
+            // Event listeners
+            executeBtn.addEventListener('click', executeQuery);
+            clearBtn.addEventListener('click', clearQuery);
+            refreshDbBtn.addEventListener('click', loadDatabases);
+            queryEditor.addEventListener('keydown', function(e) {
+                if (e.ctrlKey && e.key === 'Enter') {
+                    executeQuery();
+                }
+            });
+
+            // Tab switching
+            resultsTab.addEventListener('click', function() {
+                resultsTab.classList.add('tab-active');
+                resultsTab.classList.remove('text-gray-500');
+                rawTab.classList.remove('tab-active');
+                rawTab.classList.add('text-gray-500');
+                resultsContent.classList.remove('hidden');
+                rawContent.classList.add('hidden');
+            });
+
+            rawTab.addEventListener('click', function() {
+                rawTab.classList.add('tab-active');
+                rawTab.classList.remove('text-gray-500');
+                resultsTab.classList.remove('tab-active');
+                resultsTab.classList.add('text-gray-500');
+                rawContent.classList.remove('hidden');
+                resultsContent.classList.add('hidden');
+            });
+
+            // Query History Management
+            const MAX_HISTORY_ITEMS = 10;
+            const queryHistory = document.getElementById('queryHistory');
+
+            function loadQueryHistory() {
+                const history = JSON.parse(localStorage.getItem('queryHistory') || '[]');
+                displayQueryHistory(history);
+            }
+
+            function saveQueryToHistory(query, database) {
+                let history = JSON.parse(localStorage.getItem('queryHistory') || '[]');
+                
+                // Add new query to the beginning of the array
+                history.unshift({
+                    query: query,
+                    database: database,
+                    timestamp: new Date().toISOString()
+                });
+
+                // Keep only the last MAX_HISTORY_ITEMS queries
+                history = history.slice(0, MAX_HISTORY_ITEMS);
+
+                // Save to localStorage
+                localStorage.setItem('queryHistory', JSON.stringify(history));
+                
+                // Update display
+                displayQueryHistory(history);
+            }
+
+            function displayQueryHistory(history) {
+                queryHistory.innerHTML = '';
+                
+                if (history.length === 0) {
+                    queryHistory.innerHTML = `
+                        <div class="text-center py-4 text-gray-500">
+                            <p>No recent queries</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                history.forEach((item, index) => {
+                    const date = new Date(item.timestamp);
+                    const formattedDate = date.toLocaleString();
+                    
+                    const historyItem = document.createElement('div');
+                    historyItem.className = 'p-3 bg-gray-50 rounded-md hover:bg-gray-100 cursor-pointer transition-colors';
+                    historyItem.innerHTML = `
+                        <div class="flex justify-between items-start">
+                            <div class="flex-1">
+                                <div class="text-sm font-medium text-gray-700">${item.database}</div>
+                                <div class="text-sm text-gray-600 mt-1 font-mono">${item.query}</div>
+                                <div class="text-xs text-gray-500 mt-1">${formattedDate}</div>
+                            </div>
+                            <button class="ml-2 text-gray-400 hover:text-gray-600" onclick="event.stopPropagation(); loadQueryFromHistory(${index})">
+                                <i class="fas fa-arrow-up"></i>
+                            </button>
+                        </div>
+                    `;
+                    
+                    historyItem.addEventListener('click', () => loadQueryFromHistory(index));
+                    queryHistory.appendChild(historyItem);
+                });
+            }
+
+            function loadQueryFromHistory(index) {
+                const history = JSON.parse(localStorage.getItem('queryHistory') || '[]');
+                const item = history[index];
+                
+                if (item) {
+                    databaseSelect.value = item.database;
+                    queryEditor.value = item.query;
+                }
+            }
+
+            // Functions
+            function loadDatabases() {
+                databaseSelect.innerHTML = '<option value="">Loading databases...</option>';
+                
+                const query = {
+                    query: "SHOW DATABASES"
+                };
+
+                fetch(apiUrl.value, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(query)
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.results && data.results.length > 0) {
+                        databaseSelect.innerHTML = '';
+                        data.results.forEach(db => {
+                            const option = document.createElement('option');
+                            option.value = db.database_name;
+                            option.textContent = db.database_name;
+                            databaseSelect.appendChild(option);
+                        });
+                    } else {
+                        databaseSelect.innerHTML = '<option value="">No databases found</option>';
+                    }
+                })
+                .catch(error => {
+                    databaseSelect.innerHTML = '<option value="">Error loading databases</option>';
+                    showError('Failed to load databases', error.message);
+                });
+            }
+
+            function executeQuery() {
+                const selectedDb = databaseSelect.value;
+                const queryText = queryEditor.value.trim();
+
+                if (!selectedDb) {
+                    showError('Database Required', 'Please select a database first');
+                    return;
+                }
+
+                if (!queryText) {
+                    showError('Query Required', 'Please enter a SQL query');
+                    return;
+                }
+
+                // Show loading indicator
+                loadingIndicator.classList.remove('hidden');
+                errorContainer.classList.add('hidden');
+                resultsContent.innerHTML = '';
+                rawJson.textContent = '';
+
+                const query = {
+                    query: queryText
+                };
+
+                const url = `${apiUrl.value}?db=${encodeURIComponent(selectedDb)}`;
+
+                fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(query)
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    // Hide loading indicator
+                    loadingIndicator.classList.add('hidden');
+
+                    // Save successful query to history
+                    saveQueryToHistory(queryText, selectedDb);
+
+                    // Show raw JSON
+                    rawJson.textContent = JSON.stringify(data, null, 2);
+
+                    // Process and display results
+                    if (data.results && data.results.length > 0) {
+                        displayResults(data.results);
+                    } else {
+                        resultsContent.innerHTML = `
+                            <div class="text-center py-8 text-gray-500">
+                                <i class="fas fa-check-circle text-4xl mb-2 text-green-500"></i>
+                                <p>Query executed successfully</p>
+                                <p class="text-sm mt-2">No results returned</p>
+                            </div>
+                        `;
+                    }
+                })
+                .catch(error => {
+                    loadingIndicator.classList.add('hidden');
+                    showError('Query Execution Failed', error.message);
+                });
+            }
+
+            function displayResults(results) {
+                // Get all unique keys from the results
+                const keys = new Set();
+                results.forEach(row => {
+                    Object.keys(row).forEach(key => keys.add(key));
+                });
+                const keyArray = Array.from(keys);
+
+                // Create table
+                let tableHtml = `
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    ${keyArray.map(key => `<th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${key}</th>`).join('')}
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                `;
+
+                // Add rows
+                results.forEach((row, rowIndex) => {
+                    const rowClass = rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50';
+                    tableHtml += `<tr class="${rowClass}">`;
+                    
+                    keyArray.forEach(key => {
+                        const value = row[key] !== undefined ? row[key] : 'NULL';
+                        tableHtml += `<td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${value}</td>`;
+                    });
+                    
+                    tableHtml += '</tr>';
+                });
+
+                tableHtml += `
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="mt-2 text-sm text-gray-500">
+                        ${results.length} row${results.length !== 1 ? 's' : ''} returned
+                    </div>
+                `;
+
+                resultsContent.innerHTML = tableHtml;
+            }
+
+            function clearQuery() {
+                queryEditor.value = '';
+                resultsContent.innerHTML = `
+                    <div class="text-center py-8 text-gray-500">
+                        <i class="fas fa-database text-4xl mb-2"></i>
+                        <p>Execute a query to see results</p>
+                    </div>
+                `;
+                rawJson.textContent = 'No data yet';
+                errorContainer.classList.add('hidden');
+            }
+
+            function showError(title, message) {
+                errorContainer.classList.remove('hidden');
+                document.getElementById('errorTitle').textContent = title;
+                document.getElementById('errorMessage').textContent = message;
+            }
+
+            // Load query history on startup
+            loadQueryHistory();
+        });
+    </script>
+</body>
+</html>
