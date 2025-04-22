@@ -14,7 +14,7 @@ import (
 )
 
 //go:embed ui.html
-var uiContent embed.FS
+var uiContent string
 
 // Server represents the API server
 type Server struct {
@@ -155,12 +155,7 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Serve the embedded UI HTML file
-	content, err := uiContent.ReadFile("ui.html")
-	if err != nil {
-		log.Printf("Error reading UI file: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
+	content := uiContent
 
 	// Set proper headers
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
