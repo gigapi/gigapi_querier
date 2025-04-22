@@ -142,6 +142,18 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleUI serves the main UI page
+func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
+	// Only allow GET requests
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Serve the UI HTML file
+	http.ServeFile(w, r, "ui.html")
+}
+
 // Close the server and release resources
 func (s *Server) Close() error {
 	return s.QueryClient.Close()
@@ -197,6 +209,7 @@ func main() {
 	defer server.Close()
 
 	// Set up routes
+	http.HandleFunc("/", server.handleUI)  // Serve UI at root path
 	http.HandleFunc("/health", server.handleHealth)
 	http.HandleFunc("/query", server.handleQuery)
 
