@@ -72,9 +72,6 @@
                         <i class="fas fa-terminal text-blue-500 mr-2"></i> SQL Editor
                     </h2>
                     <div class="flex space-x-2">
-                        <select id="db-selector" class="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <option value="">Select Database...</option>
-                        </select>
                         <button id="run-query" class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg flex items-center">
                             <i class="fas fa-play mr-2"></i> Run Query
                         </button>
@@ -173,44 +170,7 @@
         // Initialize the application
         document.addEventListener('DOMContentLoaded', () => {
             setupEventListeners();
-            loadDatabases();
         });
-
-        // Load available databases
-        async function loadDatabases() {
-            try {
-                const response = await fetch('/query', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ query: 'SHOW DATABASES' })
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const result = await response.json();
-                const dbSelector = document.getElementById('db-selector');
-                
-                // Clear existing options except the first one
-                while (dbSelector.options.length > 1) {
-                    dbSelector.remove(1);
-                }
-                
-                // Add database options
-                result.results.forEach(db => {
-                    const option = document.createElement('option');
-                    option.value = db.Database;
-                    option.textContent = db.Database;
-                    dbSelector.appendChild(option);
-                });
-            } catch (error) {
-                console.error('Error loading databases:', error);
-                alert('Failed to load databases. Please try again.');
-            }
-        }
 
         // Set up event listeners
         function setupEventListeners() {
@@ -231,17 +191,10 @@
         // Execute SQL query
         async function executeQuery() {
             const sqlEditor = document.getElementById('sql-editor');
-            const dbSelector = document.getElementById('db-selector');
             const query = sqlEditor.value.trim();
-            const selectedDb = dbSelector.value;
             
             if (!query) {
                 alert('Please enter a SQL query');
-                return;
-            }
-            
-            if (!selectedDb) {
-                alert('Please select a database');
                 return;
             }
             
@@ -252,15 +205,12 @@
                 document.getElementById('empty-state').classList.add('hidden');
                 
                 // Execute query via API
-                const response = await fetch('/query', {
+                const response = await fetch('/query?db=mydb', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ 
-                        query: query,
-                        db: selectedDb
-                    })
+                    body: JSON.stringify({ query })
                 });
                 
                 if (!response.ok) {
