@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SQL Explorer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .monaco-editor { height: 150px !important; }
+        .chart-container { position: relative; height: 300px; }
+        .resize-handle {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 10px;
+            background: #e5e7eb;
+            cursor: ns-resize;
+            z-index: 10;
+        }
+        .table-container {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .table-container table {
+            min-width: 100%;
+        }
+        .table-container th {
+            position: sticky;
+            top: 0;
+            background: white;
+            z-index: 10;
+        }
+        .loading-spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-radius: 50%;
+            border-top: 4px solid #3b82f6;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .btn-disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div class="container mx-auto px-4 py-8">
+        <header class="mb-8">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-3xl font-bold text-gray-800 flex items-center">
+                        <i class="fas fa-database text-blue-500 mr-3"></i>
+                        SQL Explorer
+                    </h1>
+                    <p class="text-gray-600 mt-2">Query and visualize data with SQL</p>
+                </div>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+            <div class="bg-white rounded-xl shadow-md p-6 lg:col-span-2">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold text-gray-800">
+                        <i class="fas fa-terminal text-blue-500 mr-2"></i> SQL Editor
+                    </h2>
+                    <div class="flex space-x-2">
+                        <select id="db-selector" class="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="">Select Database...</option>
+                        </select>
+                        <button id="run-query" class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg flex items-center">
+                            <i class="fas fa-play mr-2"></i> Run Query
+                        </button>
+                        <button id="clear-query" class="bg-gray-200 hover:bg-gray-300 text-gray-800 px-4 py-2 rounded-lg">
+                            <i class="fas fa-trash-alt mr-2"></i> Clear
+                        </button>
+                    </div>
+                </div>
+                <div class="relative">
+                    <textarea id="sql-editor" class="w-full h-40 p-4 border border-gray-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="SELECT * FROM ..."></textarea>
+                    <div class="absolute bottom-2 right-2 bg-gray-100 px-2 py-1 rounded text-xs text-gray-500">
+                        <span id="row-count">0</span> rows
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-md p-6">
+                <h2 class="text-xl font-semibold text-gray-800 mb-4">
+                    <i class="fas fa-info-circle text-blue-500 mr-2"></i> Database Info
+                </h2>
+                <div id="db-info" class="space-y-3">
+                    <div class="flex items-center justify-between">
+                        <span class="text-gray-600">Status:</span>
+                        <span id="db-status" class="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">Connected</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-md p-6 mb-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold text-gray-800">
+                    <i class="fas fa-chart-bar text-blue-500 mr-2"></i> Visualization
+                </h2>
+                <div class="flex space-x-2">
+                    <select id="chart-type" class="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="table">Table</option>
+                        <option value="bar">Bar Chart</option>
+                        <option value="line">Line Chart</option>
+                        <option value="pie">Pie Chart</option>
+                        <option value="scatter">Scatter Plot</option>
+                    </select>
+                    <button id="export-csv" class="bg-gray-200 hover:bg-gray-300 text-gray-800 px-4 py-2 rounded-lg flex items-center">
+                        <i class="fas fa-file-csv mr-2"></i> Export CSV
+                    </button>
+                </div>
+            </div>
+            
+            <div id="results-container">
+                <div id="loading-indicator" class="hidden flex justify-center items-center py-12">
+                    <div class="loading-spinner"></div>
+                    <span class="ml-3 text-gray-600">Executing query...</span>
+                </div>
+                
+                <div id="results-content" class="hidden">
+                    <div id="chart-area" class="mb-6">
+                        <div class="chart-container">
+                            <canvas id="result-chart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <div id="table-area">
+                        <div class="table-container border border-gray-200 rounded-lg">
+                            <table id="result-table" class="w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                    <tr id="table-headers"></tr>
+                                </thead>
+                                <tbody id="table-body" class="bg-white divide-y divide-gray-200"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="empty-state" class="text-center py-12">
+                    <i class="fas fa-search text-gray-300 text-5xl mb-4"></i>
+                    <h3 class="text-lg font-medium text-gray-500">No results to display</h3>
+                    <p class="text-gray-400 mt-1">Run a query to see results here</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-xl shadow-md p-6">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">
+                <i class="fas fa-history text-blue-500 mr-2"></i> Query History
+            </h2>
+            <div id="query-history" class="space-y-2 max-h-40 overflow-y-auto">
+                <div class="text-gray-500 italic">No queries executed yet</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentChart = null;
+        let queryHistory = [];
+        
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', () => {
+            setupEventListeners();
+            loadDatabases();
+        });
+
+        // Load available databases
+        async function loadDatabases() {
+            try {
+                const response = await fetch('/query', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ query: 'SHOW DATABASES' })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                const dbSelector = document.getElementById('db-selector');
+                
+                // Clear existing options except the first one
+                while (dbSelector.options.length > 1) {
+                    dbSelector.remove(1);
+                }
+                
+                // Add database options
+                result.results.forEach(db => {
+                    const option = document.createElement('option');
+                    option.value = db.Database;
+                    option.textContent = db.Database;
+                    dbSelector.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error loading databases:', error);
+                alert('Failed to load databases. Please try again.');
+            }
+        }
+
+        // Set up event listeners
+        function setupEventListeners() {
+            document.getElementById('run-query').addEventListener('click', executeQuery);
+            document.getElementById('clear-query').addEventListener('click', clearQuery);
+            document.getElementById('chart-type').addEventListener('change', updateVisualization);
+            document.getElementById('export-csv').addEventListener('click', exportToCSV);
+            
+            // Set up SQL editor
+            const sqlEditor = document.getElementById('sql-editor');
+            sqlEditor.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && e.ctrlKey) {
+                    executeQuery();
+                }
+            });
+        }
+
+        // Execute SQL query
+        async function executeQuery() {
+            const sqlEditor = document.getElementById('sql-editor');
+            const dbSelector = document.getElementById('db-selector');
+            const query = sqlEditor.value.trim();
+            const selectedDb = dbSelector.value;
+            
+            if (!query) {
+                alert('Please enter a SQL query');
+                return;
+            }
+            
+            if (!selectedDb) {
+                alert('Please select a database');
+                return;
+            }
+            
+            try {
+                // Show loading indicator
+                document.getElementById('loading-indicator').classList.remove('hidden');
+                document.getElementById('results-content').classList.add('hidden');
+                document.getElementById('empty-state').classList.add('hidden');
+                
+                // Execute query via API
+                const response = await fetch('/query', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ 
+                        query: query,
+                        db: selectedDb
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                
+                // Add to query history
+                addToQueryHistory(query);
+                
+                // Display results
+                displayResults(result.results);
+                
+                // Update row count
+                document.getElementById('row-count').textContent = result.results.length;
+                
+            } catch (error) {
+                console.error('Error executing query:', error);
+                alert(`Query error: ${error.message}`);
+            } finally {
+                document.getElementById('loading-indicator').classList.add('hidden');
+            }
+        }
+
+        // Display query results
+        function displayResults(data) {
+            // Show results container
+            document.getElementById('results-content').classList.remove('hidden');
+            document.getElementById('empty-state').classList.add('hidden');
+            
+            // Get column names from first row
+            const columns = data.length > 0 ? Object.keys(data[0]) : [];
+            
+            // Display as table first
+            renderTable(data, columns);
+            
+            // Then render chart based on current selection
+            updateVisualization();
+        }
+
+        // Render results as table
+        function renderTable(data, columns) {
+            const tableHead = document.getElementById('table-headers');
+            const tableBody = document.getElementById('table-body');
+            
+            // Clear existing content
+            tableHead.innerHTML = '';
+            tableBody.innerHTML = '';
+            
+            // Create table headers
+            columns.forEach(col => {
+                const th = document.createElement('th');
+                th.className = 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider';
+                th.textContent = col;
+                tableHead.appendChild(th);
+            });
+            
+            // Create table rows
+            data.forEach(row => {
+                const tr = document.createElement('tr');
+                columns.forEach(col => {
+                    const td = document.createElement('td');
+                    td.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-500';
+                    td.textContent = row[col] !== null ? row[col].toString() : 'NULL';
+                    tr.appendChild(td);
+                });
+                tableBody.appendChild(tr);
+            });
+        }
+
+        // Update visualization based on selected type
+        function updateVisualization() {
+            const chartType = document.getElementById('chart-type').value;
+            const tableBody = document.getElementById('table-body');
+            const rows = tableBody.querySelectorAll('tr');
+            
+            if (rows.length === 0 || chartType === 'table') {
+                document.getElementById('chart-area').classList.add('hidden');
+                document.getElementById('table-area').classList.remove('hidden');
+                return;
+            }
+            
+            document.getElementById('chart-area').classList.remove('hidden');
+            document.getElementById('table-area').classList.add('hidden');
+            
+            // Get data from table
+            const headers = Array.from(document.getElementById('table-headers').children).map(th => th.textContent);
+            const data = Array.from(rows).map(row => {
+                return Array.from(row.children).map(cell => cell.textContent);
+            });
+            
+            // Prepare chart data
+            const chartData = {
+                labels: data.map(row => row[0]), // First column as labels
+                datasets: []
+            };
+            
+            // For bar, line, pie charts - use first two columns
+            if (chartType === 'bar' || chartType === 'line' || chartType === 'pie') {
+                if (headers.length >= 2) {
+                    chartData.datasets.push({
+                        label: headers[1],
+                        data: data.map(row => parseFloat(row[1]) || 0),
+                        backgroundColor: getRandomColors(data.length),
+                        borderColor: '#3b82f6',
+                        borderWidth: 1
+                    });
+                }
+            }
+            
+            // For scatter plot - use first two numeric columns
+            if (chartType === 'scatter') {
+                if (headers.length >= 2) {
+                    chartData.datasets.push({
+                        label: `${headers[0]} vs ${headers[1]}`,
+                        data: data.map(row => ({
+                            x: parseFloat(row[0]) || 0,
+                            y: parseFloat(row[1]) || 0
+                        })),
+                        backgroundColor: '#3b82f6',
+                        borderColor: '#2563eb',
+                        borderWidth: 1,
+                        pointRadius: 6
+                    });
+                }
+            }
+            
+            // Destroy previous chart if exists
+            if (currentChart) {
+                currentChart.destroy();
+            }
+            
+            // Create new chart
+            const ctx = document.getElementById('result-chart').getContext('2d');
+            
+            const chartConfig = {
+                type: chartType,
+                data: chartData,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                        },
+                        tooltip: {
+                            mode: chartType === 'scatter' ? 'nearest' : 'index',
+                            intersect: false
+                        }
+                    },
+                    scales: chartType === 'scatter' ? {
+                        x: {
+                            type: 'linear',
+                            position: 'bottom'
+                        }
+                    } : {}
+                }
+            };
+            
+            currentChart = new Chart(ctx, chartConfig);
+        }
+
+        // Add query to history
+        function addToQueryHistory(query) {
+            queryHistory.unshift({
+                query: query,
+                timestamp: new Date().toLocaleTimeString()
+            });
+            
+            // Keep only last 10 queries
+            if (queryHistory.length > 10) {
+                queryHistory.pop();
+            }
+            
+            // Update UI
+            const historyContainer = document.getElementById('query-history');
+            historyContainer.innerHTML = '';
+            
+            if (queryHistory.length === 0) {
+                historyContainer.innerHTML = '<div class="text-gray-500 italic">No queries executed yet</div>';
+                return;
+            }
+            
+            queryHistory.forEach((item, index) => {
+                const div = document.createElement('div');
+                div.className = 'bg-gray-50 p-3 rounded-lg cursor-pointer hover:bg-gray-100';
+                div.innerHTML = `
+                    <div class="flex justify-between items-start">
+                        <div class="text-sm font-mono truncate flex-1 mr-2">${item.query}</div>
+                        <span class="text-xs text-gray-400">${item.timestamp}</span>
+                    </div>
+                `;
+                
+                div.addEventListener('click', () => {
+                    document.getElementById('sql-editor').value = item.query;
+                });
+                
+                historyContainer.appendChild(div);
+            });
+        }
+
+        // Clear query editor
+        function clearQuery() {
+            document.getElementById('sql-editor').value = '';
+        }
+
+        // Export results to CSV
+        function exportToCSV() {
+            const tableBody = document.getElementById('table-body');
+            const rows = tableBody.querySelectorAll('tr');
+            
+            if (rows.length === 0) {
+                alert('No data to export');
+                return;
+            }
+            
+            const headers = Array.from(document.getElementById('table-headers').children).map(th => th.textContent);
+            const data = Array.from(rows).map(row => {
+                return Array.from(row.children).map(cell => cell.textContent);
+            });
+            
+            // Create CSV content
+            let csvContent = headers.join(',') + '\n';
+            data.forEach(row => {
+                csvContent += row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(',') + '\n';
+            });
+            
+            // Create download link
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.setAttribute('href', url);
+            link.setAttribute('download', 'query_results.csv');
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        // Helper function to generate random colors for charts
+        function getRandomColors(count) {
+            const colors = [];
+            for (let i = 0; i < count; i++) {
+                colors.push(`hsl(${Math.floor(Math.random() * 360)}, 70%, 60%)`);
+            }
+            return colors;
+        }
+    </script>
+</body>
+</html>
