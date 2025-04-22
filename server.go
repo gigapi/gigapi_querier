@@ -162,7 +162,7 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(content)
 }
 
@@ -220,12 +220,15 @@ func main() {
 	}
 	defer server.Close()
 
+	// Create a new mux for routing
+	mux := http.NewServeMux()
+
 	// Set up routes
-	http.HandleFunc("/", server.handleUI)  // Serve UI at root path
-	http.HandleFunc("/health", server.handleHealth)
-	http.HandleFunc("/query", server.handleQuery)
+	mux.HandleFunc("/", server.handleUI)  // Serve UI at root path
+	mux.HandleFunc("/health", server.handleHealth)
+	mux.HandleFunc("/query", server.handleQuery)
 
 	// Start server
 	log.Printf("GigAPI server running at http://localhost:%s", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	log.Fatal(http.ListenAndServe(":"+port, mux))
 }
