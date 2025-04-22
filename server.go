@@ -2,7 +2,7 @@
 package main
 
 import (
-	"embed"
+	_ "embed"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -14,7 +14,7 @@ import (
 )
 
 //go:embed ui.html
-var uiContent string
+var uiContent []byte
 
 // Server represents the API server
 type Server struct {
@@ -154,15 +154,12 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Serve the embedded UI HTML file
-	content := uiContent
-
 	// Set proper headers
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(content)))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(uiContent)))
 	
-	// Write the content
-	if _, err := w.Write(content); err != nil {
+	// Write the embedded UI content
+	if _, err := w.Write(uiContent); err != nil {
 		log.Printf("Error writing response: %v", err)
 	}
 }
