@@ -68,15 +68,6 @@ func (q *QueryClient) ParseQuery(sql, dbName string) (*ParsedQuery, error) {
 	sql = regexp.MustCompile(`\s+`).ReplaceAllString(sql, " ")
 	sql = strings.TrimSpace(sql)
 
-	// Check if this is a SHOW DATABASES command
-	if strings.ToUpper(sql) == "SHOW DATABASES" {
-		return &ParsedQuery{
-			Columns:     "*",
-			DbName:      dbName,
-			Measurement: "",
-		}, nil
-	}
-
 	// Extract columns
 	columnsPattern := regexp.MustCompile(`(?i)SELECT\s+(.*?)\s+FROM`)
 	columnsMatch := columnsPattern.FindStringSubmatch(sql)
@@ -534,37 +525,58 @@ func (q *QueryClient) getHourDirectoriesInRange(datePath string, startDate, endD
 	return hourDirs, nil
 }
 
-// Query executes a SQL query and returns the results
+// Query executes a query against the database
 func (c *QueryClient) Query(query, dbName string) ([]map[string]interface{}, error) {
-	// Handle SHOW DATABASES command
-	if strings.ToUpper(query) == "SHOW DATABASES" {
-		rows, err := c.DB.Query("SELECT name FROM sqlite_master WHERE type='table'")
-		if err != nil {
-			return nil, fmt.Errorf("failed to query databases: %v", err)
-		}
-		defer rows.Close()
+	// Check for special commands
+	query = strings.TrimSpace(query)
+	upperQuery := strings.ToUpper(query)
 
-		var results []map[string]interface{}
-		for rows.Next() {
-			var name string
-			if err := rows.Scan(&name); err != nil {
-				return nil, fmt.Errorf("failed to scan database name: %v", err)
+	// Handle special commands
+	switch upperQuery {
+	case "SHOW DATABASES":
+		entries, err := os.ReadDir(c.DataDir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read data directory: %v", err)
+		}
+
+		results := make([]map[string]interface{}, 0)
+		for _, entry := range entries {
+			if entry.IsDir() {
+				results = append(results, map[string]interface{}{
+					"database_name": entry.Name(),
+				})
 			}
-			results = append(results, map[string]interface{}{
-				"Database": name,
-			})
+		}
+		return results, nil
+
+	case "SHOW TABLES":
+		// List directories inside the database folder
+		dbPath := filepath.Join(c.DataDir, dbName)
+		entries, err := os.ReadDir(dbPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read database directory: %v", err)
+		}
+
+		results := make([]map[string]interface{}, 0)
+		for _, entry := range entries {
+			if entry.IsDir() {
+				results = append(results, map[string]interface{}{
+					"table_name": entry.Name(),
+				})
+			}
 		}
 		return results, nil
 	}
 
+	// Handle regular queries through DuckDB
 	// Parse the query
-	parsedQuery, err := c.ParseQuery(query, dbName)
+	parsed, err := c.ParseQuery(query, dbName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse query: %v", err)
+		return nil, err
 	}
 
 	// Find relevant files
-	files, err := c.FindRelevantFiles(parsedQuery.DbName, parsedQuery.Measurement, parsedQuery.TimeRange)
+	files, err := c.FindRelevantFiles(parsed.DbName, parsed.Measurement, parsed.TimeRange)
 	if err != nil || len(files) == 0 {
 		return nil, fmt.Errorf("no relevant files found for query")
 	}
@@ -584,7 +596,7 @@ func (c *QueryClient) Query(query, dbName string) ([]map[string]interface{}, err
 
 	if len(originalParts) >= 2 {
 		// Extract table name pattern to replace
-		tablePattern := fmt.Sprintf(`(?:%s\.)?%s\b`, parsedQuery.DbName, parsedQuery.Measurement)
+		tablePattern := fmt.Sprintf(`(?:%s\.)?%s\b`, parsed.DbName, parsed.Measurement)
 		tableRegex := regexp.MustCompile(tablePattern)
 		restOfQuery := tableRegex.ReplaceAllString(originalParts[1], "")
 
@@ -602,20 +614,20 @@ func (c *QueryClient) Query(query, dbName string) ([]map[string]interface{}, err
 	} else {
 		// Fallback to manually constructing the query
 		duckdbQuery = fmt.Sprintf("SELECT %s FROM read_parquet([%s], union_by_name=true)",
-			parsedQuery.Columns, filesList.String())
+			parsed.Columns, filesList.String())
 
 		// Add WHERE conditions
-		if parsedQuery.TimeRange.TimeCondition != "" || len(parsedQuery.WhereConditions) > 0 {
+		if parsed.TimeRange.TimeCondition != "" || len(parsed.WhereConditions) > 0 {
 			var conditions []string
 
-			if parsedQuery.TimeRange.TimeCondition != "" {
-				conditions = append(conditions, parsedQuery.TimeRange.TimeCondition)
+			if parsed.TimeRange.TimeCondition != "" {
+				conditions = append(conditions, parsed.TimeRange.TimeCondition)
 			}
 
-			if len(parsedQuery.WhereConditions) > 0 {
+			if len(parsed.WhereConditions) > 0 {
 				// Fix timestamp format in WHERE clause
 				timestampRegex := regexp.MustCompile(`([^'])(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)`)
-				processedCond := timestampRegex.ReplaceAllString(parsedQuery.WhereConditions, "$1'$2'")
+				processedCond := timestampRegex.ReplaceAllString(parsed.WhereConditions, "$1'$2'")
 				conditions = append(conditions, processedCond)
 			}
 
@@ -625,20 +637,20 @@ func (c *QueryClient) Query(query, dbName string) ([]map[string]interface{}, err
 		}
 
 		// Add GROUP BY, HAVING, ORDER BY, and LIMIT
-		if len(parsedQuery.GroupBy) > 0 {
-			duckdbQuery += " GROUP BY " + parsedQuery.GroupBy
+		if len(parsed.GroupBy) > 0 {
+			duckdbQuery += " GROUP BY " + parsed.GroupBy
 		}
 
-		if len(parsedQuery.Having) > 0 {
-			duckdbQuery += " HAVING " + parsedQuery.Having
+		if len(parsed.Having) > 0 {
+			duckdbQuery += " HAVING " + parsed.Having
 		}
 
-		if len(parsedQuery.OrderBy) > 0 {
-			duckdbQuery += " ORDER BY " + parsedQuery.OrderBy
+		if len(parsed.OrderBy) > 0 {
+			duckdbQuery += " ORDER BY " + parsed.OrderBy
 		}
 
-		if parsedQuery.Limit > 0 {
-			duckdbQuery += fmt.Sprintf(" LIMIT %d", parsedQuery.Limit)
+		if parsed.Limit > 0 {
+			duckdbQuery += fmt.Sprintf(" LIMIT %d", parsed.Limit)
 		}
 	}
 
