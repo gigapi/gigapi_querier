@@ -410,6 +410,9 @@
 
                 const url = `${apiUrl.value}?db=${encodeURIComponent(selectedDb)}`;
 
+                // Record start time
+                const startTime = performance.now();
+
                 fetch(url, {
                     method: 'POST',
                     headers: {
@@ -424,6 +427,12 @@
                     return response.json();
                 })
                 .then(data => {
+                    // Calculate execution time
+                    const executionTime = performance.now() - startTime;
+                    
+                    // Calculate response size
+                    const responseSize = new Blob([JSON.stringify(data)]).size;
+
                     // Hide loading indicator
                     loadingIndicator.classList.add('hidden');
 
@@ -441,13 +450,17 @@
 
                     // Process and display results
                     if (data.results && data.results.length > 0) {
-                        displayResults(data.results);
+                        displayResults(data.results, executionTime, responseSize);
                     } else {
                         resultsContent.innerHTML = `
                             <div class="text-center py-8 text-gray-500">
                                 <i class="fas fa-check-circle text-4xl mb-2 text-green-500"></i>
                                 <p>Query executed successfully</p>
                                 <p class="text-sm mt-2">No results returned</p>
+                                <p class="text-sm mt-2 text-gray-400">
+                                    Execution time: ${formatDuration(executionTime)} | 
+                                    Response size: ${formatBytes(responseSize)}
+                                </p>
                             </div>
                         `;
                     }
@@ -458,7 +471,30 @@
                 });
             }
 
-            function displayResults(results) {
+            function formatDuration(ms) {
+                if (ms < 1000) {
+                    return `${Math.round(ms)}ms`;
+                } else if (ms < 60000) {
+                    return `${(ms / 1000).toFixed(2)}s`;
+                } else {
+                    return `${(ms / 60000).toFixed(2)}m`;
+                }
+            }
+
+            function formatBytes(bytes) {
+                const units = ['B', 'KB', 'MB', 'GB'];
+                let size = bytes;
+                let unitIndex = 0;
+                
+                while (size >= 1024 && unitIndex < units.length - 1) {
+                    size /= 1024;
+                    unitIndex++;
+                }
+                
+                return `${size.toFixed(size < 10 ? 2 : 1)}${units[unitIndex]}`;
+            }
+
+            function displayResults(results, executionTime, responseSize) {
                 // Get all unique keys from the results
                 const keys = new Set();
                 results.forEach(row => {
@@ -495,8 +531,12 @@
                             </tbody>
                         </table>
                     </div>
-                    <div class="mt-2 text-sm text-gray-500">
-                        ${results.length} row${results.length !== 1 ? 's' : ''} returned
+                    <div class="mt-4 text-sm text-gray-400 flex items-center space-x-4">
+                        <span>${results.length} row${results.length !== 1 ? 's' : ''} returned</span>
+                        <span>•</span>
+                        <span>Execution time: ${formatDuration(executionTime)}</span>
+                        <span>•</span>
+                        <span>Response size: ${formatBytes(responseSize)}</span>
                     </div>
                 `;
 
