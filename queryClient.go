@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -296,13 +297,20 @@ func (q *QueryClient) enumFolderNoMetadata(path string) ([]string, error) {
 }
 
 // Find relevant parquet files based on time range
-func (q *QueryClient) FindRelevantFiles(dbName, measurement string, timeRange TimeRange) ([]string, error) {
+func (q *QueryClient) FindRelevantFiles(ctx context.Context, dbName, measurement string,
+	timeRange TimeRange) ([]string, error) {
 	// If no time range specified, get all files
 	if timeRange.Start == nil && timeRange.End == nil {
-		return q.findAllFiles(dbName, measurement)
+		return q.findAllFiles(ctx, dbName, measurement)
 	}
 
 	var relevantFiles []string
+	Debugf(ctx, "Getting relevant files for %s.%s within time range %v to %v", dbName, measurement,
+		time.Unix(0, *timeRange.Start), time.Unix(0, *timeRange.End))
+	start := time.Now()
+	defer func() {
+		Debugf(ctx, "Found %d files in: %v", len(relevantFiles), time.Since(start))
+	}()
 
 	// Convert nanosecond timestamps to time.Time for directory parsing
 	var startDate, endDate time.Time
@@ -357,9 +365,15 @@ func (q *QueryClient) FindRelevantFiles(dbName, measurement string, timeRange Ti
 }
 
 // Find all files for a measurement
-func (q *QueryClient) findAllFiles(dbName, measurement string) ([]string, error) {
+func (q *QueryClient) findAllFiles(ctx context.Context, dbName, measurement string) ([]string, error) {
 	var allFiles []string
 	basePath := filepath.Join(q.DataDir, dbName, measurement)
+
+	Debugf(ctx, "Getting all files for %s.%s", dbName, measurement)
+	start := time.Now()
+	defer func() {
+		Debugf(ctx, "Found %d files in: %v", len(allFiles), time.Since(start))
+	}()
 
 	if _, err := os.Stat(basePath); os.IsNotExist(err) {
 		return allFiles, nil
@@ -526,7 +540,7 @@ func (q *QueryClient) getHourDirectoriesInRange(datePath string, startDate, endD
 }
 
 // Query executes a query against the database
-func (c *QueryClient) Query(query, dbName string) ([]map[string]interface{}, error) {
+func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[string]interface{}, error) {
 	// Check for special commands
 	query = strings.TrimSpace(query)
 	upperQuery := strings.ToUpper(query)
@@ -576,10 +590,12 @@ func (c *QueryClient) Query(query, dbName string) ([]map[string]interface{}, err
 	}
 
 	// Find relevant files
-	files, err := c.FindRelevantFiles(parsed.DbName, parsed.Measurement, parsed.TimeRange)
+	files, err := c.FindRelevantFiles(ctx, parsed.DbName, parsed.Measurement, parsed.TimeRange)
 	if err != nil || len(files) == 0 {
 		return nil, fmt.Errorf("no relevant files found for query")
 	}
+
+	start := time.Now()
 
 	// Build the DuckDB query
 	var filesList strings.Builder
@@ -654,6 +670,9 @@ func (c *QueryClient) Query(query, dbName string) ([]map[string]interface{}, err
 		}
 	}
 
+	Debugf(ctx, "Created DuckDB query in: %v. Query: %s", time.Since(start), duckdbQuery)
+	start = time.Now()
+
 	// Execute the query
 	stmt, err := c.DB.Prepare(duckdbQuery)
 	if err != nil {
@@ -672,6 +691,9 @@ func (c *QueryClient) Query(query, dbName string) ([]map[string]interface{}, err
 	if err != nil {
 		return nil, fmt.Errorf("failed to get columns: %v", err)
 	}
+
+	Debugf(ctx, "Retrieved first query result in: %v", time.Since(start))
+	start = time.Now()
 
 	// Prepare result structure
 	var result []map[string]interface{}
@@ -709,6 +731,8 @@ func (c *QueryClient) Query(query, dbName string) ([]map[string]interface{}, err
 
 		result = append(result, row)
 	}
+
+	Debugf(ctx, "Got query result in: %v", time.Since(start))
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating rows: %v", err)

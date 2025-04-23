@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"flag"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sync/atomic"
 	"time"
 )
 
@@ -50,6 +52,8 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
+var reqId int32
+
 // addCORSHeaders adds CORS headers to the response
 func addCORSHeaders(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -59,6 +63,7 @@ func addCORSHeaders(w http.ResponseWriter) {
 
 // handleQuery handles the /query endpoint
 func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
+	ctx := WithDefaultLogger(r.Context(), fmt.Sprintf("req-%d", atomic.AddInt32(&reqId, 1)))
 	// Add CORS headers
 	addCORSHeaders(w)
 
@@ -95,12 +100,12 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		dbName = "mydb" // Default
 	}
 
-	log.Printf("Executing query for database '%s': %s", dbName, req.Query)
+	Infof(ctx, "Executing query for database '%s': %s", dbName, req.Query)
 
 	// Execute query
-	results, err := s.QueryClient.Query(req.Query, dbName)
+	results, err := s.QueryClient.Query(ctx, req.Query, dbName)
 	if err != nil {
-		log.Printf("Query error: %v", err)
+		Errorf(ctx, "Query error: %v", err)
 		sendErrorResponse(w, fmt.Sprintf("Query execution failed: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -185,7 +190,7 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 	// Set proper headers
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(uiContent)))
-	
+
 	// Write the embedded UI content
 	if _, err := w.Write(uiContent); err != nil {
 		log.Printf("Error writing response: %v", err)
@@ -198,6 +203,7 @@ func (s *Server) Close() error {
 }
 
 func main() {
+	ctx := WithDefaultLogger(context.Background(), "main")
 	// Add command line flags
 	queryFlag := flag.String("query", "", "Execute a single query and exit")
 	dbFlag := flag.String("db", "mydb", "Database name to query")
@@ -218,13 +224,14 @@ func main() {
 	client := NewQueryClient(dataDir)
 	err := client.Initialize()
 	if err != nil {
-		log.Fatalf("Failed to initialize query client: %v", err)
+		Errorf(ctx, "Failed to initialize query client: %v", err)
+		os.Exit(1)
 	}
 	defer client.Close()
 
 	// If query flag is provided, execute query and exit
 	if *queryFlag != "" {
-		results, err := client.Query(*queryFlag, *dbFlag)
+		results, err := client.Query(ctx, *queryFlag, *dbFlag)
 		if err != nil {
 			log.Fatalf("Query error: %v", err)
 		}
@@ -242,7 +249,8 @@ func main() {
 	// Create server for HTTP mode
 	server, err := NewServer(dataDir)
 	if err != nil {
-		log.Fatalf("Failed to initialize server: %v", err)
+		Errorf(ctx, "Failed to initialize server: %v", err)
+		os.Exit(1)
 	}
 	defer server.Close()
 
@@ -255,6 +263,10 @@ func main() {
 	mux.HandleFunc("/query", server.handleQuery)
 
 	// Start server
-	log.Printf("GigAPI server running at http://localhost:%s", port)
-	log.Fatal(http.ListenAndServe(":"+port, mux))
+	Infof(ctx, "GigAPI server running at http://localhost:%s", port)
+	err = http.ListenAndServe(":"+port, mux)
+	if err != nil {
+		Errorf(ctx, "Failed to start server: %v", err)
+		os.Exit(1)
+	}
 }
