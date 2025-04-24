@@ -5,17 +5,17 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gigapi/gigapi-querier/queryClient"
+	"github.com/gigapi/gigapi-querier/core"
 )
 
 // TableOperations handles operations on Iceberg tables
 type TableOperations struct {
 	Catalog *Catalog
-	QueryClient *queryClient.QueryClient
+	QueryClient core.QueryClient
 }
 
 // NewTableOperations creates a new TableOperations instance
-func NewTableOperations(catalog *Catalog, queryClient *queryClient.QueryClient) *TableOperations {
+func NewTableOperations(catalog *Catalog, queryClient core.QueryClient) *TableOperations {
 	return &TableOperations{
 		Catalog: catalog,
 		QueryClient: queryClient,

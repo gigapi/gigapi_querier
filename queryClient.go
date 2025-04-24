@@ -13,6 +13,7 @@ import (
 	"time"
 
 	_ "github.com/marcboeker/go-duckdb/v2"
+	"github.com/gigapi/gigapi-querier/core"
 )
 
 var db *sql.DB
