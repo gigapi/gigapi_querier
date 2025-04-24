@@ -110,7 +110,7 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	results, err := s.QueryClient.Query(ctx, req.Query, dbName)
 	if err != nil {
 		Errorf(ctx, "Query error: %v", err)
-		sendErrorResponse(w, fmt.Sprintf("Query execution failed: %v", err), http.StatusInternalServerError)
+		sendErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
