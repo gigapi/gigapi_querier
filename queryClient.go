@@ -18,6 +18,9 @@ import (
 
 var db *sql.DB
 
+// Ensure QueryClient implements core.QueryClient interface
+var _ core.QueryClient = (*QueryClient)(nil)
+
 // QueryClient handles parsing SQL and querying parquet files
 type QueryClient struct {
 	DataDir          string

@@ -3,7 +3,6 @@ module github.com/gigapi/gigapi-querier
 go 1.24.1
 
 require (
-	github.com/apache/iceberg-go v0.1.0
 	github.com/marcboeker/go-duckdb/v2 v2.2.0
 	go.uber.org/zap v1.27.0
 )
