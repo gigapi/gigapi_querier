@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -40,6 +41,7 @@ func NewServer(dataDir string) (*Server, error) {
 type QueryRequest struct {
 	Query string `json:"query"`
 	DB    string `json:"db,omitempty"`
+	OrgID string `json:"orgID,omitempty"`
 }
 
 // QueryResponse represents a query API response
@@ -79,11 +81,36 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse request body
 	var req QueryRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		sendErrorResponse(w, "Invalid request body", http.StatusBadRequest)
-		return
+
+	// Helper function to get case-insensitive URL parameter
+	getURLParam := func(param string) string {
+		// Convert parameter name to lowercase for case-insensitive comparison
+		paramLower := strings.ToLower(param)
+		// Check all query parameters
+		for key, values := range r.URL.Query() {
+			if strings.ToLower(key) == paramLower && len(values) > 0 {
+				return values[0]
+			}
+		}
+		return ""
+	}
+
+	// Try to get query from URL parameters first (case-insensitive)
+	queryFromURL := getURLParam("q")
+	if queryFromURL == "" {
+		queryFromURL = getURLParam("query")
+	}
+
+	if queryFromURL != "" {
+		// If query is in URL, use it
+		req.Query = queryFromURL
+	} else {
+		// Otherwise try to parse from POST body
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			sendErrorResponse(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
 	}
 
 	if req.Query == "" {
@@ -91,16 +118,31 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract database name from query param or body
-	dbName := r.URL.Query().Get("db")
+	// Extract database name with priority (case-insensitive):
+	// 1. URL parameter 'db' or 'database'
+	// 2. POST body 'db' field
+	// 3. Default to 'default'
+	dbName := getURLParam("db")
+	if dbName == "" {
+		dbName = getURLParam("database")
+	}
 	if dbName == "" {
 		dbName = req.DB
 	}
 	if dbName == "" {
-		dbName = "mydb" // Default
+		dbName = "default" // Default
 	}
 
-	Infof(ctx, "Executing query for database '%s': %s", dbName, req.Query)
+	// Extract orgID with priority (case-insensitive):
+	// 1. URL parameter 'orgID'
+	// 2. POST body 'orgID' field
+	orgID := getURLParam("orgID")
+	if orgID == "" {
+		orgID = req.OrgID
+	}
+
+	// Log the request details
+	Infof(ctx, "Executing query for database '%s' (orgID: %s): %s", dbName, orgID, req.Query)
 
 	// Execute query
 	results, err := s.QueryClient.Query(ctx, req.Query, dbName)
