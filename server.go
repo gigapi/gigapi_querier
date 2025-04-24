@@ -21,6 +21,7 @@ var uiContent []byte
 // Server represents the API server
 type Server struct {
 	QueryClient *QueryClient
+	DisableUI   bool
 }
 
 // NewServer creates a new server instance
@@ -31,8 +32,11 @@ func NewServer(dataDir string) (*Server, error) {
 		return nil, err
 	}
 
+	disableUI := os.Getenv("DISABLE_UI") == "true"
+
 	return &Server{
 		QueryClient: client,
+		DisableUI:   disableUI,
 	}, nil
 }
 
@@ -178,6 +182,12 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // handleUI serves the main UI page
 func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
+	// If UI is disabled, return 404
+	if s.DisableUI {
+		http.NotFound(w, r)
+		return
+	}
+
 	// Add CORS headers
 	addCORSHeaders(w)
 
