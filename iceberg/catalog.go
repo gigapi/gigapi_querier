@@ -104,12 +104,7 @@ func (c *Catalog) GetTableMetadata(namespace, name string) (*TableMetadata, erro
 
 // GetTableFiles returns all data files for a table
 func (c *Catalog) GetTableFiles(namespace, name string) ([]string, error) {
-	metadata, err := c.MetadataReader.ReadMetadata(name)
-	if err != nil {
-		return nil, err
-	}
-
-	snapshotID, manifestList, err := c.MetadataReader.GetCurrentSnapshot(name)
+	_, manifestList, err := c.MetadataReader.GetCurrentSnapshot(name)
 	if err != nil {
 		return nil, err
 	}

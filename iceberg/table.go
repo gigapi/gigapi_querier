@@ -4,16 +4,18 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/gigapi/gigapi-querier/queryClient"
 )
 
 // TableOperations handles operations on Iceberg tables
 type TableOperations struct {
 	Catalog *Catalog
-	QueryClient *QueryClient
+	QueryClient *queryClient.QueryClient
 }
 
 // NewTableOperations creates a new TableOperations instance
-func NewTableOperations(catalog *Catalog, queryClient *QueryClient) *TableOperations {
+func NewTableOperations(catalog *Catalog, queryClient *queryClient.QueryClient) *TableOperations {
 	return &TableOperations{
 		Catalog: catalog,
 		QueryClient: queryClient,
@@ -34,7 +36,6 @@ func (t *TableOperations) TranslateIcebergQuery(ctx context.Context, namespace, 
 
 	// Extract table name and any conditions
 	tableParts := strings.SplitN(fromClause, " WHERE ", 2)
-	tableName := strings.TrimSpace(tableParts[0])
 	whereClause := ""
 	if len(tableParts) > 1 {
 		whereClause = tableParts[1]

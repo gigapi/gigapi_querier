@@ -22,6 +22,8 @@ type ManifestEntry struct {
 	ExistingFilesCount int `json:"existing_files_count"`
 	DeletedFilesCount int `json:"deleted_files_count"`
 	PartitionSummaries []PartitionSummary `json:"partition_summaries"`
+	Status string `json:"status"`
+	DataFile DataFile `json:"data_file"`
 }
 
 // PartitionSummary represents a summary of partition values
@@ -43,6 +45,24 @@ type Manifest struct {
 	ExistingFilesCount int `json:"existing_files_count"`
 	DeletedFilesCount int `json:"deleted_files_count"`
 	Entries []ManifestEntry `json:"entries"`
+}
+
+// DataFile represents a data file entry in a manifest
+type DataFile struct {
+	Path string `json:"path"`
+	Format string `json:"format"`
+	Partition map[string]string `json:"partition"`
+	RecordCount int64 `json:"record_count"`
+	FileSizeInBytes int64 `json:"file_size_in_bytes"`
+	ColumnSizes map[int]int64 `json:"column_sizes"`
+	ValueCounts map[int]int64 `json:"value_counts"`
+	NullValueCounts map[int]int64 `json:"null_value_counts"`
+	LowerBounds map[int][]byte `json:"lower_bounds"`
+	UpperBounds map[int][]byte `json:"upper_bounds"`
+	KeyMetadata []byte `json:"key_metadata"`
+	SplitOffsets []int64 `json:"split_offsets"`
+	EqualityIds []int `json:"equality_ids"`
+	SortOrderId int `json:"sort_order_id"`
 }
 
 // ManifestProcessor handles reading and processing Iceberg manifest files
