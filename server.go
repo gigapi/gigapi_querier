@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"sync/atomic"
 	"time"
+
+	"github.com/gigapi/gigapi-querier/iceberg"
 )
 
 //go:embed ui.html
@@ -22,6 +24,8 @@ var uiContent []byte
 type Server struct {
 	QueryClient *QueryClient
 	DisableUI   bool
+	IcebergCatalog *iceberg.Catalog
+	IcebergTableOps *iceberg.TableOperations
 }
 
 // NewServer creates a new server instance
@@ -34,9 +38,15 @@ func NewServer(dataDir string) (*Server, error) {
 
 	disableUI := os.Getenv("DISABLE_UI") == "true"
 
+	// Initialize Iceberg components
+	catalog := iceberg.NewCatalog(dataDir)
+	tableOps := iceberg.NewTableOperations(catalog, client)
+
 	return &Server{
 		QueryClient: client,
 		DisableUI:   disableUI,
+		IcebergCatalog: catalog,
+		IcebergTableOps: tableOps,
 	}, nil
 }
 
@@ -212,6 +222,178 @@ func (s *Server) Close() error {
 	return s.QueryClient.Close()
 }
 
+// IcebergQueryRequest represents an Iceberg query API request
+type IcebergQueryRequest struct {
+	Query string `json:"query"`
+	Namespace string `json:"namespace"`
+	Table string `json:"table"`
+}
+
+// handleIcebergQuery handles the /iceberg/query endpoint
+func (s *Server) handleIcebergQuery(w http.ResponseWriter, r *http.Request) {
+	ctx := WithDefaultLogger(r.Context(), fmt.Sprintf("req-%d", atomic.AddInt32(&reqId, 1)))
+	
+	// Add CORS headers
+	addCORSHeaders(w)
+
+	// Handle preflight requests
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Only allow POST
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse request body
+	var req IcebergQueryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendErrorResponse(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Query == "" {
+		sendErrorResponse(w, "Missing query parameter", http.StatusBadRequest)
+		return
+	}
+
+	if req.Namespace == "" {
+		req.Namespace = "mydb" // Default namespace
+	}
+
+	if req.Table == "" {
+		sendErrorResponse(w, "Missing table parameter", http.StatusBadRequest)
+		return
+	}
+
+	Infof(ctx, "Executing Iceberg query for table '%s.%s': %s", req.Namespace, req.Table, req.Query)
+
+	// Execute query using Iceberg table operations
+	results, err := s.IcebergTableOps.ExecuteQuery(ctx, req.Namespace, req.Table, req.Query)
+	if err != nil {
+		Errorf(ctx, "Iceberg query error: %v", err)
+		sendErrorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Process results to handle special types for JSON
+	processedResults := processResultsForJSON(results)
+
+	// Send response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(QueryResponse{
+		Results: processedResults,
+	})
+}
+
+// handleIcebergTables handles the /iceberg/tables endpoint
+func (s *Server) handleIcebergTables(w http.ResponseWriter, r *http.Request) {
+	ctx := WithDefaultLogger(r.Context(), fmt.Sprintf("req-%d", atomic.AddInt32(&reqId, 1)))
+	
+	// Add CORS headers
+	addCORSHeaders(w)
+
+	// Handle preflight requests
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Only allow GET
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	namespace := r.URL.Query().Get("namespace")
+	if namespace == "" {
+		namespace = "mydb" // Default namespace
+	}
+
+	// List tables in the namespace
+	tables, err := s.IcebergCatalog.ListTables(namespace)
+	if err != nil {
+		Errorf(ctx, "Failed to list Iceberg tables: %v", err)
+		sendErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Convert to response format
+	var results []map[string]interface{}
+	for _, table := range tables {
+		results = append(results, map[string]interface{}{
+			"namespace": table.Namespace,
+			"name": table.Name,
+		})
+	}
+
+	// Send response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(QueryResponse{
+		Results: results,
+	})
+}
+
+// handleIcebergSchema handles the /iceberg/schema endpoint
+func (s *Server) handleIcebergSchema(w http.ResponseWriter, r *http.Request) {
+	ctx := WithDefaultLogger(r.Context(), fmt.Sprintf("req-%d", atomic.AddInt32(&reqId, 1)))
+	
+	// Add CORS headers
+	addCORSHeaders(w)
+
+	// Handle preflight requests
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Only allow GET
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	namespace := r.URL.Query().Get("namespace")
+	table := r.URL.Query().Get("table")
+
+	if namespace == "" {
+		namespace = "mydb" // Default namespace
+	}
+
+	if table == "" {
+		sendErrorResponse(w, "Missing table parameter", http.StatusBadRequest)
+		return
+	}
+
+	// Get table schema
+	schema, err := s.IcebergTableOps.GetTableSchema(namespace, table)
+	if err != nil {
+		Errorf(ctx, "Failed to get Iceberg table schema: %v", err)
+		sendErrorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Convert to response format
+	var results []map[string]interface{}
+	for _, field := range schema.Fields {
+		results = append(results, map[string]interface{}{
+			"name": field.Name,
+			"type": field.Type,
+			"required": field.Required,
+			"doc": field.Doc,
+		})
+	}
+
+	// Send response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(QueryResponse{
+		Results: results,
+	})
+}
+
 func main() {
 	ctx := WithDefaultLogger(context.Background(), "main")
 	// Add command line flags
@@ -223,6 +405,11 @@ func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
+	}
+
+	icebergPort := os.Getenv("ICEBERG_PORT")
+	if icebergPort == "" {
+		icebergPort = "8081"
 	}
 
 	dataDir := os.Getenv("DATA_DIR")
@@ -272,11 +459,29 @@ func main() {
 	mux.HandleFunc("/health", server.handleHealth)
 	mux.HandleFunc("/query", server.handleQuery)
 
-	// Start server
+	// Start main server
 	Infof(ctx, "GigAPI server running at http://localhost:%s", port)
-	err = http.ListenAndServe(":"+port, mux)
+	go func() {
+		err = http.ListenAndServe(":"+port, mux)
+		if err != nil {
+			Errorf(ctx, "Failed to start main server: %v", err)
+			os.Exit(1)
+		}
+	}()
+
+	// Create a new mux for Iceberg API
+	icebergMux := http.NewServeMux()
+
+	// Set up Iceberg routes
+	icebergMux.HandleFunc("/iceberg/query", server.handleIcebergQuery)
+	icebergMux.HandleFunc("/iceberg/tables", server.handleIcebergTables)
+	icebergMux.HandleFunc("/iceberg/schema", server.handleIcebergSchema)
+
+	// Start Iceberg server
+	Infof(ctx, "Iceberg API server running at http://localhost:%s", icebergPort)
+	err = http.ListenAndServe(":"+icebergPort, icebergMux)
 	if err != nil {
-		Errorf(ctx, "Failed to start server: %v", err)
+		Errorf(ctx, "Failed to start Iceberg server: %v", err)
 		os.Exit(1)
 	}
 }
