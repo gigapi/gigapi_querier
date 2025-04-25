@@ -79,9 +79,19 @@ func NewManifestProcessor(basePath string) *ManifestProcessor {
 
 // ReadManifestList reads and parses the manifest list file
 func (p *ManifestProcessor) ReadManifestList(tableName, manifestListPath string) (*ManifestList, error) {
+	// Validate inputs
+	if strings.Contains(tableName, "..") || strings.Contains(manifestListPath, "..") ||
+		strings.ContainsAny(tableName, "/\\") || strings.ContainsAny(manifestListPath, "/\\") {
+		return nil, fmt.Errorf("invalid tableName or manifestListPath")
+	}
+
 	fullPath := filepath.Join(p.BasePath, tableName, manifestListPath)
-	
-	data, err := os.ReadFile(fullPath)
+	absPath, err := filepath.Abs(fullPath)
+	if err != nil || !strings.HasPrefix(absPath, p.BasePath) {
+		return nil, fmt.Errorf("invalid resolved path")
+	}
+
+	data, err := os.ReadFile(absPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read manifest list: %v", err)
 	}
@@ -96,9 +106,19 @@ func (p *ManifestProcessor) ReadManifestList(tableName, manifestListPath string)
 
 // ReadManifest reads and parses a single manifest file
 func (p *ManifestProcessor) ReadManifest(tableName, manifestPath string) (*Manifest, error) {
+	// Validate inputs
+	if strings.Contains(tableName, "..") || strings.Contains(manifestPath, "..") ||
+		strings.ContainsAny(tableName, "/\\") || strings.ContainsAny(manifestPath, "/\\") {
+		return nil, fmt.Errorf("invalid tableName or manifestPath")
+	}
+
 	fullPath := filepath.Join(p.BasePath, tableName, manifestPath)
-	
-	data, err := os.ReadFile(fullPath)
+	absPath, err := filepath.Abs(fullPath)
+	if err != nil || !strings.HasPrefix(absPath, p.BasePath) {
+		return nil, fmt.Errorf("invalid resolved path")
+	}
+
+	data, err := os.ReadFile(absPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read manifest: %v", err)
 	}
