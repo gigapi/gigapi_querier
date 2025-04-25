@@ -95,4 +95,48 @@ func (t *TableOperations) GetTablePartitionSpec(namespace, name string) ([]Parti
 	}
 
 	return metadata.PartitionSpec, nil
+}
+
+// GetCurrentSchema returns the current schema of an Iceberg table by querying the actual data files
+func (t *TableOperations) GetCurrentSchema(ctx context.Context, namespace, name string) (*Schema, error) {
+	// Get the table files
+	files, err := t.Catalog.GetTableFiles(namespace, name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get table files: %v", err)
+	}
+
+	// Build the files list for the query
+	var filesList strings.Builder
+	for i, file := range files {
+		if i > 0 {
+			filesList.WriteString(", ")
+		}
+		filesList.WriteString(fmt.Sprintf("'%s'", file))
+	}
+
+	// Construct the DESCRIBE query
+	describeQuery := fmt.Sprintf("DESCRIBE SELECT * FROM read_parquet([%s], union_by_name=true)", filesList.String())
+
+	// Execute the query
+	results, err := t.QueryClient.Query(ctx, describeQuery, namespace)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get schema: %v", err)
+	}
+
+	// Convert results to Schema
+	schema := &Schema{
+		Type:   "struct",
+		Fields: make([]Field, 0, len(results)),
+	}
+
+	for _, row := range results {
+		field := Field{
+			Name:     row["column_name"].(string),
+			Type:     row["column_type"].(string),
+			Required: true, // DuckDB doesn't provide nullability info in DESCRIBE
+		}
+		schema.Fields = append(schema.Fields, field)
+	}
+
+	return schema, nil
 } 

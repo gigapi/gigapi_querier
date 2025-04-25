@@ -21,9 +21,11 @@ gigapi-querier:
     - ./data:/data
   ports:
     - "8080:8080"
+    - "8081:8081"
   environment:
     - DATA_DIR=/data
     - PORT=8080
+    - ICEBERG_PORT=8081
 ```
 
 ### Build
@@ -32,33 +34,39 @@ gigapi-querier:
 go build -o gigapi *.go
 
 # Start the server
-PORT=8080 DATA_DIR=./data ./gigapi
+PORT=8080 ICEBERG_PORT=8081 DATA_DIR=./data ./gigapi
 ```
 
 ### Configuration
 
-- `PORT`: Server port (default: 8080)
+- `PORT`: Main server port (default: 8080)
+- `ICEBERG_PORT`: Iceberg API server port (default: 8081)
 - `DATA_DIR`: Path to data directory (default: ./data)
+- `DISABLE_UI`: Disable web UI (optional)
 
 ## <img src="https://github.com/user-attachments/assets/a9aa3ebd-9164-476d-aedf-97b817078350" width=24 /> API Endpoints
 
 ### Query Data
 
 ```bash
-$ curl -X POST "http://localhost:9999/query?db=mydb" \
+$ curl -X POST "http://localhost:8080/query?db=mydb" \
   -H "Content-Type: application/json"  \
-{"query": "SELECT time, location, temperature FROM weather WHERE time >= '2025-04-01T00:00:00'"}
+  -d '{"query": "SELECT time, location, temperature FROM weather WHERE time >= '2025-04-01T00:00:00'"}'
 ```
 
-Series can be used with or without time ranges, ie for counting, calculating averages, etc.
+### Iceberg Tables
 
 ```bash
-$ curl -X POST "http://localhost:9999/query?db=mydb" \
-  -H "Content-Type: application/json"  \
-  -d '{"query": "SELECT count(*), avg(temperature) FROM weather"}'
-```
-```json
-{"results":[{"avg(temperature)":87.025,"count_star()":"40"}]}
+# List tables
+$ curl "http://localhost:8081/iceberg/tables?namespace=mydb"
+
+# Get table schema
+$ curl "http://localhost:8081/iceberg/schema?namespace=mydb&table=mytable"
+
+# Query table
+$ curl -X POST "http://localhost:8081/iceberg/query" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "SELECT * FROM table", "namespace": "mydb", "table": "mytable"}'
 ```
 
 The GigAPI Querier can also be used in CLI mode to execute an individual query
@@ -66,13 +74,9 @@ The GigAPI Querier can also be used in CLI mode to execute an individual query
 ```bash
 $ ./gigapi --query "SELECT count(*), avg(temperature) FROM weather" --db mydb
 ```
-```json
-{"results":[{"avg(temperature)":87.025,"count_star()":"40"}]}
-```
 
 A quick and dirty query user-interface is also provided for testing
 ![image](https://github.com/user-attachments/assets/a9f09b3f-10fc-42e3-9092-770252e0d8d3)
-
 
 ## <img src="https://github.com/user-attachments/assets/a9aa3ebd-9164-476d-aedf-97b817078350" width=24 /> Data Structure
 
@@ -93,12 +97,12 @@ A quick and dirty query user-interface is also provided for testing
 3. Use DuckDB to execute optimized queries against selected files
 4. Post-process results to handle BigInt timestamps
 
-
 ## <img src="https://github.com/user-attachments/assets/a9aa3ebd-9164-476d-aedf-97b817078350" width=24 /> Notes for Developers
 
 - File paths in metadata.json may contain absolute paths; the system handles both absolute and relative paths
 - Time fields are converted from nanosecond BigInt to ISO strings
 - Add `?debug=true` to query requests for detailed troubleshooting information
+- Iceberg support uses existing QueryClient and DuckDB for all operations
 
 -----
 
