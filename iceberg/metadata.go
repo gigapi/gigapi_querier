@@ -7,6 +7,14 @@ import (
 	"path/filepath"
 )
 
+// isValidTableName validates that the table name is a single path component
+func isValidTableName(name string) bool {
+	if name == "" || strings.Contains(name, "/") || strings.Contains(name, "\\") || strings.Contains(name, "..") {
+		return false
+	}
+	return true
+}
+
 // TableMetadata represents the Iceberg table metadata structure
 type TableMetadata struct {
 	FormatVersion int    `json:"format-version"`
@@ -78,6 +86,11 @@ func NewMetadataReader(basePath string) *MetadataReader {
 
 // ReadMetadata reads and parses the Iceberg metadata file
 func (r *MetadataReader) ReadMetadata(tableName string) (*TableMetadata, error) {
+	// Validate tableName to prevent directory traversal
+	if !isValidTableName(tableName) {
+		return nil, fmt.Errorf("invalid table name: %s", tableName)
+	}
+
 	metadataPath := filepath.Join(r.BasePath, tableName, "metadata", "v1.metadata.json")
 	
 	data, err := os.ReadFile(metadataPath)
