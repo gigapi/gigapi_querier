@@ -62,6 +62,11 @@ func (c *Catalog) LoadTable(namespace, name string) (*Table, error) {
 
 // ListTables lists all tables in a namespace
 func (c *Catalog) ListTables(namespace string) ([]TableIdentifier, error) {
+	// Validate namespace to prevent directory traversal
+	if strings.Contains(namespace, "/") || strings.Contains(namespace, "\\") || strings.Contains(namespace, "..") {
+		return nil, fmt.Errorf("invalid namespace: %s", namespace)
+	}
+
 	namespacePath := filepath.Join(c.BasePath, namespace)
 	
 	entries, err := os.ReadDir(namespacePath)
