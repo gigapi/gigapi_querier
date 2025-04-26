@@ -24,33 +24,9 @@ func NewTableOperations(catalog *Catalog, queryClient core.QueryClient) *TableOp
 
 // ExecuteQuery executes a query on an Iceberg table
 func (t *TableOperations) ExecuteQuery(ctx context.Context, namespace, name string, icebergQuery string) ([]map[string]interface{}, error) {
-	// Get the table files
-	core.Infof(ctx, "Getting files for table %s.%s", namespace, name)
-	files, err := t.Catalog.GetTableFiles(ctx, namespace, name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get table files: %v", err)
-	}
-
-	if len(files) == 0 {
-		return nil, fmt.Errorf("no files found for table %s.%s", namespace, name)
-	}
-
-	core.Infof(ctx, "Found %d files for table %s.%s", len(files), namespace, name)
-
-	// Build the files list for the query
-	var filesList strings.Builder
-	for i, file := range files {
-		if i > 0 {
-			filesList.WriteString(", ")
-		}
-		filesList.WriteString(fmt.Sprintf("'%s'", file))
-	}
-
-	// Replace table name with read_parquet in the query
-	query := strings.Replace(icebergQuery, name, fmt.Sprintf("read_parquet([%s], union_by_name=true)", filesList.String()), 1)
-	
-	core.Infof(ctx, "Executing query: %s", query)
-	return t.QueryClient.Query(ctx, query, namespace)
+	// Just pass the query through to QueryClient
+	core.Infof(ctx, "Executing query: %s", icebergQuery)
+	return t.QueryClient.Query(ctx, icebergQuery, namespace)
 }
 
 // GetTableSchema returns the schema of an Iceberg table using DuckDB's DESCRIBE
