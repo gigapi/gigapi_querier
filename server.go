@@ -27,6 +27,7 @@ type Server struct {
 	DisableUI   bool
 	IcebergCatalog *iceberg.Catalog
 	IcebergTableOps *iceberg.TableOperations
+	RESTCatalog *iceberg.RESTCatalogServer
 }
 
 // NewServer creates a new server instance
@@ -42,12 +43,14 @@ func NewServer(dataDir string) (*Server, error) {
 	// Initialize Iceberg components
 	catalog := iceberg.NewCatalog(dataDir, client)
 	tableOps := iceberg.NewTableOperations(catalog, client)
+	restCatalog := iceberg.NewRESTCatalogServer(catalog, client)
 
 	return &Server{
 		QueryClient: client,
 		DisableUI:   disableUI,
 		IcebergCatalog: catalog,
 		IcebergTableOps: tableOps,
+		RESTCatalog: restCatalog,
 	}, nil
 }
 
@@ -480,6 +483,9 @@ func main() {
 	icebergMux.HandleFunc("/iceberg/query", server.handleIcebergQuery)
 	icebergMux.HandleFunc("/iceberg/tables", server.handleIcebergTables)
 	icebergMux.HandleFunc("/iceberg/schema", server.handleIcebergSchema)
+
+	// Register REST Catalog API handlers
+	server.RESTCatalog.RegisterHandlers(icebergMux)
 
 	// Start Iceberg server
 	Infof(ctx, "Iceberg API server running at http://localhost:%s", icebergPort)

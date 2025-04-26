@@ -135,4 +135,13 @@ func (c *Catalog) GetTableFiles(ctx context.Context, namespace, name string) ([]
 
 	core.Infof(ctx, "Found %d parquet files for table %s.%s", len(files), namespace, name)
 	return files, nil
+}
+
+// GetTableSchema returns the schema of a table
+func (c *Catalog) GetTableSchema(namespace, name string) (*Schema, error) {
+	// Create a new TableOperations instance
+	tableOps := NewTableOperations(c, c.QueryClient)
+	
+	// Use TableOperations to get the schema
+	return tableOps.GetTableSchema(namespace, name)
 } 
