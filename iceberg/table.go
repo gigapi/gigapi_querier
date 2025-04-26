@@ -81,14 +81,9 @@ func (t *TableOperations) ExecuteQuery(ctx context.Context, namespace, name stri
 		return nil, err
 	}
 
-	// Execute the query directly without namespace context since the translated query works on its own
-	results, err := t.QueryClient.Query(ctx, internalQuery, "")
-	if err != nil {
-		core.Errorf(ctx, "Query execution failed. Translated query: %s", internalQuery)
-		return nil, err
-	}
-
-	return results, nil
+	// Execute the query using our existing QueryClient
+	// The translated query already contains the full file paths, so we don't need any namespace/database context
+	return t.QueryClient.Query(ctx, internalQuery, "")
 }
 
 // GetTableSchema returns the schema of an Iceberg table using DuckDB's DESCRIBE

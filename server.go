@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -269,10 +270,13 @@ func (s *Server) handleIcebergQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	Infof(ctx, "Executing Iceberg query for table '%s.%s': %s", req.Namespace, req.Table, req.Query)
+	// Replace 'table' with the actual table name in the query
+	query := strings.Replace(req.Query, "table", req.Table, -1)
+
+	Infof(ctx, "Executing Iceberg query for table '%s.%s': %s", req.Namespace, req.Table, query)
 
 	// Execute query using Iceberg table operations
-	results, err := s.IcebergTableOps.ExecuteQuery(ctx, req.Namespace, req.Table, req.Query)
+	results, err := s.IcebergTableOps.ExecuteQuery(ctx, req.Namespace, req.Table, query)
 	if err != nil {
 		Errorf(ctx, "Iceberg query error: %v", err)
 		sendErrorResponse(w, err.Error(), http.StatusBadRequest)
