@@ -81,8 +81,14 @@ func (t *TableOperations) ExecuteQuery(ctx context.Context, namespace, name stri
 		return nil, err
 	}
 
-	// Execute the query using our existing QueryClient
-	return t.QueryClient.Query(ctx, internalQuery, namespace)
+	// Execute the query directly without namespace context since the translated query works on its own
+	results, err := t.QueryClient.Query(ctx, internalQuery, "")
+	if err != nil {
+		core.Errorf(ctx, "Query execution failed. Translated query: %s", internalQuery)
+		return nil, err
+	}
+
+	return results, nil
 }
 
 // GetTableSchema returns the schema of an Iceberg table using DuckDB's DESCRIBE
