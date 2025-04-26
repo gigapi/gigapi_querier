@@ -1,6 +1,7 @@
 package iceberg
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -92,41 +93,41 @@ func (c *Catalog) GetTableLocation(namespace, name string) (string, error) {
 }
 
 // GetTableFiles returns all data files for a table using QueryClient
-func (c *Catalog) GetTableFiles(namespace, name string) ([]string, error) {
+func (c *Catalog) GetTableFiles(ctx context.Context, namespace, name string) ([]string, error) {
 	// Log the lookup attempt
-	Infof(nil, "Looking up files for table %s.%s in base path: %s", namespace, name, c.BasePath)
+	core.Infof(ctx, "Looking up files for table %s.%s in base path: %s", namespace, name, c.BasePath)
 
 	// Check if the table directory exists
 	tablePath := filepath.Join(c.BasePath, namespace, name)
 	if _, err := os.Stat(tablePath); os.IsNotExist(err) {
-		Errorf(nil, "Table directory does not exist: %s", tablePath)
+		core.Errorf(ctx, "Table directory does not exist: %s", tablePath)
 		return nil, fmt.Errorf("table directory not found: %s", tablePath)
 	}
 
 	// Use QueryClient to find all parquet files for this table
 	query := fmt.Sprintf("SELECT * FROM %s.%s LIMIT 1", namespace, name)
-	Infof(nil, "Executing test query: %s", query)
+	core.Infof(ctx, "Executing test query: %s", query)
 	
-	_, err := c.QueryClient.Query(nil, query, namespace)
+	_, err := c.QueryClient.Query(ctx, query, namespace)
 	if err != nil {
-		Errorf(nil, "Failed to execute test query: %v", err)
+		core.Errorf(ctx, "Failed to execute test query: %v", err)
 		return nil, fmt.Errorf("failed to get table files: %v", err)
 	}
 
 	// Log the data directory structure
-	Infof(nil, "Scanning directory structure for %s", tablePath)
+	core.Infof(ctx, "Scanning directory structure for %s", tablePath)
 	err = filepath.Walk(tablePath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			Errorf(nil, "Error accessing path %s: %v", path, err)
+			core.Errorf(ctx, "Error accessing path %s: %v", path, err)
 			return nil // Continue walking
 		}
 		if !info.IsDir() && strings.HasSuffix(info.Name(), ".parquet") {
-			Infof(nil, "Found parquet file: %s", path)
+			core.Infof(ctx, "Found parquet file: %s", path)
 		}
 		return nil
 	})
 	if err != nil {
-		Errorf(nil, "Error walking directory: %v", err)
+		core.Errorf(ctx, "Error walking directory: %v", err)
 	}
 
 	// The QueryClient will handle finding the relevant files

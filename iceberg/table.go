@@ -42,7 +42,7 @@ func (t *TableOperations) TranslateIcebergQuery(ctx context.Context, namespace, 
 	}
 
 	// Get the table files
-	files, err := t.Catalog.GetTableFiles(namespace, name)
+	files, err := t.Catalog.GetTableFiles(ctx, namespace, name)
 	if err != nil {
 		return "", fmt.Errorf("failed to get table files: %v", err)
 	}
@@ -114,7 +114,7 @@ func (t *TableOperations) GetTablePartitionSpec(namespace, name string) ([]Parti
 // GetCurrentSchema returns the current schema of an Iceberg table by querying the actual data files
 func (t *TableOperations) GetCurrentSchema(ctx context.Context, namespace, name string) (*Schema, error) {
 	// Get the table files
-	files, err := t.Catalog.GetTableFiles(namespace, name)
+	files, err := t.Catalog.GetTableFiles(ctx, namespace, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get table files: %v", err)
 	}
