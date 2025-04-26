@@ -81,9 +81,68 @@ func (t *TableOperations) ExecuteQuery(ctx context.Context, namespace, name stri
 		return nil, err
 	}
 
-	// Execute the query using our existing QueryClient
+	// Execute the query directly using DuckDB
 	// The translated query already contains the full file paths, so we don't need any namespace/database context
-	return t.QueryClient.Query(ctx, internalQuery, "")
+	stmt, err := t.QueryClient.DB.Prepare(internalQuery)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare query: %v", err)
+	}
+	defer stmt.Close()
+
+	rows, err := stmt.Query()
+	if err != nil {
+		return nil, fmt.Errorf("query execution failed: %v", err)
+	}
+	defer rows.Close()
+
+	// Get column names
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get columns: %v", err)
+	}
+
+	// Prepare result structure
+	var result []map[string]interface{}
+
+	// Process rows
+	for rows.Next() {
+		// Create a slice of interface{} to hold the values
+		values := make([]interface{}, len(columns))
+		valuePtrs := make([]interface{}, len(columns))
+
+		// Set up pointers to each interface{}
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+
+		// Scan the row into the values
+		if err := rows.Scan(valuePtrs...); err != nil {
+			return nil, fmt.Errorf("error scanning row: %v", err)
+		}
+
+		// Create a map for this row
+		row := make(map[string]interface{})
+
+		// Set each column in the map
+		for i, col := range columns {
+			val := values[i]
+
+			// Handle special cases for counts
+			if strings.Contains(col, "count") && val == nil {
+				row[col] = 0
+			} else {
+				row[col] = val
+			}
+		}
+
+		result = append(result, row)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rows: %v", err)
+	}
+
+	return result, nil
 }
 
 // GetTableSchema returns the schema of an Iceberg table using DuckDB's DESCRIBE
