@@ -11,11 +11,15 @@ import (
 const LoggerKey = "LOGGER"
 
 func getLogger(ctx context.Context) *zap.Logger {
-	logger, _ := ctx.Value(LoggerKey).(*zap.Logger)
-	if logger == nil {
-		// Fallback to a no-op logger if not found in context
+	if ctx == nil {
 		return zap.NewNop()
 	}
+	
+	logger, ok := ctx.Value(LoggerKey).(*zap.Logger)
+	if !ok || logger == nil {
+		return zap.NewNop()
+	}
+	
 	return logger
 }
 
@@ -52,4 +56,9 @@ func Errorf(ctx context.Context, tpl string, args ...any) {
 
 func Debugf(ctx context.Context, tpl string, args ...any) {
 	getLogger(ctx).Sugar().Debugf(tpl, args...)
+}
+
+func GetRequestID(ctx context.Context) string {
+	// Implementation of GetRequestID function
+	return "" // Placeholder return, actual implementation needed
 }

@@ -545,6 +545,11 @@ func (q *QueryClient) getHourDirectoriesInRange(datePath string, startDate, endD
 
 // Query executes a query against the database
 func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[string]interface{}, error) {
+	// Ensure we have a context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	// Check for special commands
 	query = strings.TrimSpace(query)
 	upperQuery := strings.ToUpper(query)
