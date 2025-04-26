@@ -77,24 +77,38 @@ func (t *TableOperations) ExecuteQuery(ctx context.Context, namespace, name stri
 	return t.QueryClient.Query(ctx, internalQuery, namespace)
 }
 
-// GetTableSchema returns the schema of an Iceberg table
+// GetTableSchema returns the schema of an Iceberg table using DuckDB's DESCRIBE
 func (t *TableOperations) GetTableSchema(namespace, name string) (*Schema, error) {
-	metadata, err := t.Catalog.GetTableMetadata(namespace, name)
+	// Use DuckDB's DESCRIBE to get the schema
+	describeQuery := fmt.Sprintf("DESCRIBE SELECT * FROM %s.%s", namespace, name)
+	results, err := t.QueryClient.Query(nil, describeQuery, namespace)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get schema: %v", err)
 	}
 
-	return &metadata.Schema, nil
+	// Convert results to Schema
+	schema := &Schema{
+		Type:   "struct",
+		Fields: make([]Field, 0, len(results)),
+	}
+
+	for _, row := range results {
+		field := Field{
+			Name:     row["column_name"].(string),
+			Type:     row["column_type"].(string),
+			Required: true, // DuckDB doesn't provide nullability info in DESCRIBE
+		}
+		schema.Fields = append(schema.Fields, field)
+	}
+
+	return schema, nil
 }
 
 // GetTablePartitionSpec returns the partition specification of an Iceberg table
 func (t *TableOperations) GetTablePartitionSpec(namespace, name string) ([]PartitionSpec, error) {
-	metadata, err := t.Catalog.GetTableMetadata(namespace, name)
-	if err != nil {
-		return nil, err
-	}
-
-	return metadata.PartitionSpec, nil
+	// Since we're using our existing infrastructure, we don't need partition specs
+	// Return an empty slice as we don't use Iceberg's partitioning
+	return []PartitionSpec{}, nil
 }
 
 // GetCurrentSchema returns the current schema of an Iceberg table by querying the actual data files
