@@ -305,15 +305,16 @@ func (q *QueryClient) FindRelevantFiles(ctx context.Context, dbName, measurement
 	timeRange TimeRange) ([]string, error) {
 	// If no time range specified, get all files
 	if timeRange.Start == nil && timeRange.End == nil {
+		Infof(ctx, "No time range specified, getting all files for %s.%s", dbName, measurement)
 		return q.findAllFiles(ctx, dbName, measurement)
 	}
 
 	var relevantFiles []string
-	Debugf(ctx, "Getting relevant files for %s.%s within time range %v to %v", dbName, measurement,
+	Infof(ctx, "Getting relevant files for %s.%s within time range %v to %v", dbName, measurement,
 		time.Unix(0, *timeRange.Start), time.Unix(0, *timeRange.End))
 	start := time.Now()
 	defer func() {
-		Debugf(ctx, "Found %d files in: %v", len(relevantFiles), time.Since(start))
+		Infof(ctx, "Found %d files in: %v", len(relevantFiles), time.Since(start))
 	}()
 
 	// Convert nanosecond timestamps to time.Time for directory parsing
@@ -331,38 +332,55 @@ func (q *QueryClient) FindRelevantFiles(ctx context.Context, dbName, measurement
 	}
 
 	// Get all date directories that might contain relevant data
+	Infof(ctx, "Looking for date directories between %v and %v", startDate, endDate)
 	dateDirectories, err := q.getDateDirectoriesInRange(dbName, measurement, startDate, endDate)
 	if err != nil {
+		Errorf(ctx, "Failed to get date directories: %v", err)
 		return nil, err
 	}
+	Infof(ctx, "Found %d date directories", len(dateDirectories))
 
 	for _, dateDir := range dateDirectories {
 		// For each date directory, get all hour directories
 		datePath := filepath.Join(q.DataDir, dbName, measurement, dateDir)
+		Infof(ctx, "Processing date directory: %s", datePath)
+		
 		hourDirs, err := q.getHourDirectoriesInRange(datePath, startDate, endDate)
 		if err != nil {
+			Errorf(ctx, "Failed to get hour directories for %s: %v", datePath, err)
 			continue // Skip this directory on error
 		}
+		Infof(ctx, "Found %d hour directories in %s", len(hourDirs), dateDir)
 
 		for _, hourDir := range hourDirs {
 			hourPath := filepath.Join(datePath, hourDir)
+			Infof(ctx, "Processing hour directory: %s", hourPath)
 
 			// Read metadata.json
 			metadataPath := filepath.Join(hourPath, "metadata.json")
 			if _, err := os.Stat(metadataPath); err == nil {
+				Infof(ctx, "Found metadata.json in %s", hourPath)
 				_relevantFiles, err := q.enumFolderWithMetadata(metadataPath, timeRange)
 				if err == nil {
+					Infof(ctx, "Found %d files in metadata.json", len(_relevantFiles))
 					relevantFiles = append(relevantFiles, _relevantFiles...)
 					continue
 				}
+				Errorf(ctx, "Failed to read metadata.json: %v", err)
 			}
 
 			_relevantFiles, err := q.enumFolderNoMetadata(hourPath)
 			if err == nil {
+				Infof(ctx, "Found %d files without metadata", len(_relevantFiles))
 				relevantFiles = append(relevantFiles, _relevantFiles...)
 				continue
 			}
+			Errorf(ctx, "Failed to enumerate folder: %v", err)
 		}
+	}
+
+	if len(relevantFiles) == 0 {
+		Errorf(ctx, "No files found in any directory for %s.%s", dbName, measurement)
 	}
 
 	return relevantFiles, nil
