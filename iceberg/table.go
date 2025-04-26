@@ -22,39 +22,22 @@ func NewTableOperations(catalog *Catalog, queryClient core.QueryClient) *TableOp
 	}
 }
 
-// TranslateIcebergQuery translates an Iceberg query to our internal query format
-func (t *TableOperations) TranslateIcebergQuery(ctx context.Context, namespace, name string, icebergQuery string) (string, error) {
-	// Parse the Iceberg query to extract components
-	// This is a simplified version - in reality, you'd want to use a proper SQL parser
-	parts := strings.SplitN(icebergQuery, " FROM ", 2)
-	if len(parts) != 2 {
-		return "", fmt.Errorf("invalid query format")
-	}
-
-	selectClause := parts[0]
-	fromClause := parts[1]
-
-	// Extract table name and any conditions
-	tableParts := strings.SplitN(fromClause, " WHERE ", 2)
-	whereClause := ""
-	if len(tableParts) > 1 {
-		whereClause = tableParts[1]
-	}
-
+// ExecuteQuery executes a query on an Iceberg table
+func (t *TableOperations) ExecuteQuery(ctx context.Context, namespace, name string, icebergQuery string) ([]map[string]interface{}, error) {
 	// Get the table files
 	core.Infof(ctx, "Getting files for table %s.%s", namespace, name)
 	files, err := t.Catalog.GetTableFiles(ctx, namespace, name)
 	if err != nil {
-		return "", fmt.Errorf("failed to get table files: %v", err)
+		return nil, fmt.Errorf("failed to get table files: %v", err)
 	}
 
 	if len(files) == 0 {
-		return "", fmt.Errorf("no files found for table %s.%s", namespace, name)
+		return nil, fmt.Errorf("no files found for table %s.%s", namespace, name)
 	}
 
 	core.Infof(ctx, "Found %d files for table %s.%s", len(files), namespace, name)
 
-	// Build the internal query
+	// Build the files list for the query
 	var filesList strings.Builder
 	for i, file := range files {
 		if i > 0 {
@@ -63,27 +46,11 @@ func (t *TableOperations) TranslateIcebergQuery(ctx context.Context, namespace, 
 		filesList.WriteString(fmt.Sprintf("'%s'", file))
 	}
 
-	// Construct the internal query
-	internalQuery := fmt.Sprintf("%s FROM read_parquet([%s], union_by_name=true)", selectClause, filesList.String())
-	if whereClause != "" {
-		internalQuery += " WHERE " + whereClause
-	}
-
-	core.Infof(ctx, "Translated query: %s", internalQuery)
-	return internalQuery, nil
-}
-
-// ExecuteQuery executes a query on an Iceberg table
-func (t *TableOperations) ExecuteQuery(ctx context.Context, namespace, name string, icebergQuery string) ([]map[string]interface{}, error) {
-	// Translate the Iceberg query to our internal format
-	internalQuery, err := t.TranslateIcebergQuery(ctx, namespace, name, icebergQuery)
-	if err != nil {
-		return nil, err
-	}
-
-	// Execute the query using QueryClient
-	// The translated query already contains the full file paths, so we don't need any namespace/database context
-	return t.QueryClient.Query(ctx, internalQuery, "")
+	// Replace table name with read_parquet in the query
+	query := strings.Replace(icebergQuery, name, fmt.Sprintf("read_parquet([%s], union_by_name=true)", filesList.String()), 1)
+	
+	core.Infof(ctx, "Executing query: %s", query)
+	return t.QueryClient.Query(ctx, query, namespace)
 }
 
 // GetTableSchema returns the schema of an Iceberg table using DuckDB's DESCRIBE
