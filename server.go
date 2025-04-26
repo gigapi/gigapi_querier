@@ -39,7 +39,7 @@ func NewServer(dataDir string) (*Server, error) {
 	disableUI := os.Getenv("DISABLE_UI") == "true"
 
 	// Initialize Iceberg components
-	catalog := iceberg.NewCatalog(dataDir)
+	catalog := iceberg.NewCatalog(dataDir, client)
 	tableOps := iceberg.NewTableOperations(catalog, client)
 
 	return &Server{

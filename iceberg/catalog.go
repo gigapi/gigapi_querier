@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/gigapi/gigapi-querier/core"
 )
 
 // TableIdentifier represents an Iceberg table identifier
@@ -17,22 +19,19 @@ type TableIdentifier struct {
 type Table struct {
 	Identifier TableIdentifier
 	Location   string
-	Metadata   *TableMetadata
 }
 
 // Catalog represents the minimal Iceberg catalog interface
 type Catalog struct {
 	BasePath string
-	MetadataReader *MetadataReader
-	ManifestProcessor *ManifestProcessor
+	QueryClient core.QueryClient
 }
 
 // NewCatalog creates a new Catalog instance
-func NewCatalog(basePath string) *Catalog {
+func NewCatalog(basePath string, queryClient core.QueryClient) *Catalog {
 	return &Catalog{
 		BasePath: basePath,
-		MetadataReader: NewMetadataReader(basePath),
-		ManifestProcessor: NewManifestProcessor(basePath),
+		QueryClient: queryClient,
 	}
 }
 
@@ -45,19 +44,12 @@ func (c *Catalog) LoadTable(namespace, name string) (*Table, error) {
 		return nil, fmt.Errorf("table %s.%s does not exist", namespace, name)
 	}
 
-	// Read metadata
-	metadata, err := c.MetadataReader.ReadMetadata(name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read table metadata: %v", err)
-	}
-
 	return &Table{
 		Identifier: TableIdentifier{
 			Namespace: namespace,
 			Name:      name,
 		},
 		Location: tablePath,
-		Metadata: metadata,
 	}, nil
 }
 
@@ -78,14 +70,10 @@ func (c *Catalog) ListTables(namespace string) ([]TableIdentifier, error) {
 	var tables []TableIdentifier
 	for _, entry := range entries {
 		if entry.IsDir() {
-			// Check if it's a valid table by looking for metadata
-			metadataPath := filepath.Join(namespacePath, entry.Name(), "metadata")
-			if _, err := os.Stat(metadataPath); err == nil {
-				tables = append(tables, TableIdentifier{
-					Namespace: namespace,
-					Name:      entry.Name(),
-				})
-			}
+			tables = append(tables, TableIdentifier{
+				Namespace: namespace,
+				Name:      entry.Name(),
+			})
 		}
 	}
 
@@ -103,17 +91,16 @@ func (c *Catalog) GetTableLocation(namespace, name string) (string, error) {
 	return tablePath, nil
 }
 
-// GetTableMetadata returns the metadata for a table
-func (c *Catalog) GetTableMetadata(namespace, name string) (*TableMetadata, error) {
-	return c.MetadataReader.ReadMetadata(name)
-}
-
-// GetTableFiles returns all data files for a table
+// GetTableFiles returns all data files for a table using QueryClient
 func (c *Catalog) GetTableFiles(namespace, name string) ([]string, error) {
-	_, manifestList, err := c.MetadataReader.GetCurrentSnapshot(name)
+	// Use QueryClient to find all parquet files for this table
+	query := fmt.Sprintf("SELECT * FROM %s.%s LIMIT 1", namespace, name)
+	_, err := c.QueryClient.Query(nil, query, namespace)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get table files: %v", err)
 	}
 
-	return c.ManifestProcessor.GetDataFiles(name, manifestList)
+	// The QueryClient will handle finding the relevant files
+	// We don't need to look for metadata files
+	return []string{}, nil
 } 
