@@ -95,42 +95,44 @@ func (c *Catalog) GetTableLocation(namespace, name string) (string, error) {
 // GetTableFiles returns all data files for a table using QueryClient
 func (c *Catalog) GetTableFiles(ctx context.Context, namespace, name string) ([]string, error) {
 	// Log the lookup attempt
-	core.Infof(ctx, "Looking up files for table %s.%s in base path: %s", namespace, name, c.BasePath)
+	core.Infof(ctx, "Looking up files for table %s.%s", namespace, name)
 
 	// Check if the table directory exists
 	tablePath := filepath.Join(c.BasePath, namespace, name)
 	if _, err := os.Stat(tablePath); os.IsNotExist(err) {
-		core.Errorf(ctx, "Table directory does not exist: %s", tablePath)
+		core.Errorf(ctx, "Table directory not found: %s", tablePath)
 		return nil, fmt.Errorf("table directory not found: %s", tablePath)
 	}
 
 	// Use QueryClient to find all parquet files for this table
 	query := fmt.Sprintf("SELECT * FROM %s.%s LIMIT 1", namespace, name)
-	core.Infof(ctx, "Executing test query: %s", query)
-	
 	_, err := c.QueryClient.Query(ctx, query, namespace)
 	if err != nil {
 		core.Errorf(ctx, "Failed to execute test query: %v", err)
 		return nil, fmt.Errorf("failed to get table files: %v", err)
 	}
 
-	// Log the data directory structure
-	core.Infof(ctx, "Scanning directory structure for %s", tablePath)
+	// Find all parquet files
+	var files []string
 	err = filepath.Walk(tablePath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			core.Errorf(ctx, "Error accessing path %s: %v", path, err)
 			return nil // Continue walking
 		}
 		if !info.IsDir() && strings.HasSuffix(info.Name(), ".parquet") {
-			core.Infof(ctx, "Found parquet file: %s", path)
+			files = append(files, path)
 		}
 		return nil
 	})
 	if err != nil {
 		core.Errorf(ctx, "Error walking directory: %v", err)
+		return nil, err
 	}
 
-	// The QueryClient will handle finding the relevant files
-	// We don't need to look for metadata files
-	return []string{}, nil
+	if len(files) == 0 {
+		core.Errorf(ctx, "No parquet files found in %s", tablePath)
+		return nil, fmt.Errorf("no parquet files found in table directory")
+	}
+
+	core.Infof(ctx, "Found %d parquet files for table %s.%s", len(files), namespace, name)
+	return files, nil
 } 

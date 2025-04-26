@@ -42,10 +42,17 @@ func (t *TableOperations) TranslateIcebergQuery(ctx context.Context, namespace, 
 	}
 
 	// Get the table files
+	core.Infof(ctx, "Getting files for table %s.%s", namespace, name)
 	files, err := t.Catalog.GetTableFiles(ctx, namespace, name)
 	if err != nil {
 		return "", fmt.Errorf("failed to get table files: %v", err)
 	}
+
+	if len(files) == 0 {
+		return "", fmt.Errorf("no files found for table %s.%s", namespace, name)
+	}
+
+	core.Infof(ctx, "Found %d files for table %s.%s", len(files), namespace, name)
 
 	// Build the internal query
 	var filesList strings.Builder
@@ -62,6 +69,7 @@ func (t *TableOperations) TranslateIcebergQuery(ctx context.Context, namespace, 
 		internalQuery += " WHERE " + whereClause
 	}
 
+	core.Infof(ctx, "Translated query: %s", internalQuery)
 	return internalQuery, nil
 }
 
