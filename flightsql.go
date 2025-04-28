@@ -92,6 +92,53 @@ func (s *FlightSQLServer) GetFlightInfo(ctx context.Context, desc *flight.Flight
 	log.Printf("GetFlightInfo called with descriptor type: %v, path: %v, cmd: %v", 
 		desc.Type, desc.Path, string(desc.Cmd))
 	
+	// Handle SQL query command
+	if desc.Type == flight.DescriptorCMD && string(desc.Cmd) == "Ctype.googleapis.com/arrow.flight.protocol.sql.CommandStatementQuery" {
+		// Extract the actual SQL query from the descriptor
+		query := string(desc.Cmd)
+		if len(query) > 0 {
+			// Execute the query using our existing QueryClient
+			results, err := s.queryClient.Query(ctx, query, "mydb") // Using default database for now
+			if err != nil {
+				log.Printf("Query execution failed: %v", err)
+				return nil, fmt.Errorf("failed to execute query: %w", err)
+			}
+
+			// Convert results to Arrow format
+			_, recordBatch, err := convertResultsToArrow(results)
+			if err != nil {
+				log.Printf("Failed to convert results to Arrow format: %v", err)
+				return nil, fmt.Errorf("failed to convert results to Arrow format: %w", err)
+			}
+
+			// Create a ticket for the results
+			ticket := &flight.Ticket{
+				Ticket: []byte("query-results"),
+			}
+
+			// Create the flight info
+			info := &flight.FlightInfo{
+				FlightDescriptor: desc,
+				Endpoint: []*flight.FlightEndpoint{
+					{
+						Ticket: ticket,
+						Location: []*flight.Location{
+							{
+								Uri: "grpc://localhost:8082",
+							},
+						},
+					},
+				},
+				TotalRecords: recordBatch.NumRows(),
+				TotalBytes:   -1,
+				Schema:       []byte{}, // Empty schema, will be sent in DoGet
+			}
+
+			log.Printf("Returning flight info with %d records", recordBatch.NumRows())
+			return info, nil
+		}
+	}
+	
 	// For now, we don't support any other flight info requests
 	return nil, fmt.Errorf("unsupported flight descriptor type: %v", desc.Type)
 }
