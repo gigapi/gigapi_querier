@@ -110,7 +110,8 @@ func (s *FlightSQLServer) GetFlightInfo(ctx context.Context, desc *flight.Flight
 			log.Printf("Executing SQL query: %v", query)
 			
 			// Execute the query using our existing QueryClient
-			results, err := s.queryClient.Query(ctx, query, "mydb") // Using default database for now
+			// For FlightSQL, we'll pass the query directly to DuckDB
+			results, err := s.queryClient.Query(ctx, query, "mydb") // Using default database
 			if err != nil {
 				log.Printf("Query execution failed: %v", err)
 				return nil, fmt.Errorf("failed to execute query: %w", err)
