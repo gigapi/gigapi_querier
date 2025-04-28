@@ -296,50 +296,182 @@ func convertResultsToArrow(results []map[string]interface{}) (*arrow.Schema, arr
 
 	// Create Arrow schema from the first result
 	fields := make([]arrow.Field, 0)
-	for key := range results[0] {
-		fields = append(fields, arrow.Field{
-			Name: key,
-			Type: arrow.PrimitiveTypes.Int64, // Use Int64 for numeric values
-		})
+	for key, val := range results[0] {
+		var arrowType arrow.DataType
+		switch v := val.(type) {
+		case int, int32, int64:
+			arrowType = arrow.PrimitiveTypes.Int64
+		case float32, float64:
+			arrowType = arrow.PrimitiveTypes.Float64
+		case string:
+			arrowType = arrow.BinaryTypes.String
+		case bool:
+			arrowType = arrow.FixedWidthTypes.Boolean
+		case time.Time:
+			arrowType = arrow.FixedWidthTypes.Timestamp_us
+		case nil:
+			// For NULL values, try to infer type from other rows
+			arrowType = inferTypeFromColumn(key, results)
+		default:
+			log.Printf("Unknown type for value %v: %T", v, v)
+			arrowType = arrow.BinaryTypes.String // Default to string for unknown types
+		}
+		fields = append(fields, arrow.Field{Name: key, Type: arrowType, Nullable: true})
 	}
 	schema := arrow.NewSchema(fields, nil)
 
 	// Create Arrow arrays for each column
 	allocator := memory.DefaultAllocator
 	arrays := make([]arrow.Array, len(fields))
+	
 	for i, field := range fields {
-		builder := array.NewInt64Builder(allocator)
-		for _, row := range results {
-			val := row[field.Name]
-			if val == nil {
-				builder.AppendNull()
-			} else {
-				// Convert the value to int64
+		var builder array.Builder
+		switch field.Type.ID() {
+		case arrow.INT64:
+			builder = array.NewInt64Builder(allocator)
+			for _, row := range results {
+				val := row[field.Name]
+				if val == nil {
+					builder.AppendNull()
+					continue
+				}
 				switch v := val.(type) {
-				case int64:
-					builder.Append(v)
 				case int:
-					builder.Append(int64(v))
+					builder.(*array.Int64Builder).Append(int64(v))
+				case int32:
+					builder.(*array.Int64Builder).Append(int64(v))
+				case int64:
+					builder.(*array.Int64Builder).Append(v)
 				case float64:
-					builder.Append(int64(v))
+					builder.(*array.Int64Builder).Append(int64(v))
 				case string:
-					// Try to parse the string as a number
 					if num, err := strconv.ParseInt(v, 10, 64); err == nil {
-						builder.Append(num)
+						builder.(*array.Int64Builder).Append(num)
 					} else {
-						builder.AppendNull()
+						builder.(*array.Int64Builder).AppendNull()
 					}
 				default:
-					builder.AppendNull()
+					builder.(*array.Int64Builder).AppendNull()
 				}
+			}
+		case arrow.FLOAT64:
+			builder = array.NewFloat64Builder(allocator)
+			for _, row := range results {
+				val := row[field.Name]
+				if val == nil {
+					builder.AppendNull()
+					continue
+				}
+				switch v := val.(type) {
+				case float64:
+					builder.(*array.Float64Builder).Append(v)
+				case float32:
+					builder.(*array.Float64Builder).Append(float64(v))
+				case int:
+					builder.(*array.Float64Builder).Append(float64(v))
+				case int64:
+					builder.(*array.Float64Builder).Append(float64(v))
+				case string:
+					if num, err := strconv.ParseFloat(v, 64); err == nil {
+						builder.(*array.Float64Builder).Append(num)
+					} else {
+						builder.(*array.Float64Builder).AppendNull()
+					}
+				default:
+					builder.(*array.Float64Builder).AppendNull()
+				}
+			}
+		case arrow.STRING:
+			builder = array.NewStringBuilder(allocator)
+			for _, row := range results {
+				val := row[field.Name]
+				if val == nil {
+					builder.AppendNull()
+					continue
+				}
+				builder.(*array.StringBuilder).Append(fmt.Sprintf("%v", val))
+			}
+		case arrow.BOOL:
+			builder = array.NewBooleanBuilder(allocator)
+			for _, row := range results {
+				val := row[field.Name]
+				if val == nil {
+					builder.AppendNull()
+					continue
+				}
+				switch v := val.(type) {
+				case bool:
+					builder.(*array.BooleanBuilder).Append(v)
+				case string:
+					if b, err := strconv.ParseBool(v); err == nil {
+						builder.(*array.BooleanBuilder).Append(b)
+					} else {
+						builder.(*array.BooleanBuilder).AppendNull()
+					}
+				default:
+					builder.(*array.BooleanBuilder).AppendNull()
+				}
+			}
+		case arrow.TIMESTAMP:
+			builder = array.NewTimestampBuilder(allocator, &arrow.TimestampType{Unit: arrow.Microsecond})
+			for _, row := range results {
+				val := row[field.Name]
+				if val == nil {
+					builder.AppendNull()
+					continue
+				}
+				switch v := val.(type) {
+				case time.Time:
+					builder.(*array.TimestampBuilder).Append(arrow.Timestamp(v.UnixMicro()))
+				case string:
+					if t, err := time.Parse(time.RFC3339Nano, v); err == nil {
+						builder.(*array.TimestampBuilder).Append(arrow.Timestamp(t.UnixMicro()))
+					} else {
+						builder.(*array.TimestampBuilder).AppendNull()
+					}
+				default:
+					builder.(*array.TimestampBuilder).AppendNull()
+				}
+			}
+		default:
+			builder = array.NewStringBuilder(allocator)
+			for _, row := range results {
+				val := row[field.Name]
+				if val == nil {
+					builder.AppendNull()
+					continue
+				}
+				builder.(*array.StringBuilder).Append(fmt.Sprintf("%v", val))
 			}
 		}
 		arrays[i] = builder.NewArray()
+		builder.Release()
 	}
 
 	// Create record batch
 	recordBatch := array.NewRecord(schema, arrays, int64(len(results)))
 	return schema, recordBatch, nil
+}
+
+// inferTypeFromColumn attempts to infer the Arrow type for a column by looking at non-null values
+func inferTypeFromColumn(columnName string, results []map[string]interface{}) arrow.DataType {
+	for _, row := range results {
+		if val := row[columnName]; val != nil {
+			switch val.(type) {
+			case int, int32, int64:
+				return arrow.PrimitiveTypes.Int64
+			case float32, float64:
+				return arrow.PrimitiveTypes.Float64
+			case string:
+				return arrow.BinaryTypes.String
+			case bool:
+				return arrow.FixedWidthTypes.Boolean
+			case time.Time:
+				return arrow.FixedWidthTypes.Timestamp_us
+			}
+		}
+	}
+	return arrow.BinaryTypes.String // Default to string if no non-null values found
 }
 
 // StartFlightSQLServer starts the FlightSQL server
