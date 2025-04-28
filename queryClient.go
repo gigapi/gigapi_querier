@@ -616,18 +616,14 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 	// Check if this is a simple query without FROM clause
 	if !strings.Contains(upperQuery, "FROM") {
 		// Execute the query directly with DuckDB
-		log.Printf("Preparing DuckDB query: %q", query)
 		stmt, err := c.DB.Prepare(query)
 		if err != nil {
-			log.Printf("Failed to prepare query: %v\nQuery was: %q", err, query)
 			return nil, fmt.Errorf("failed to prepare query: %v", err)
 		}
 		defer stmt.Close()
 
-		log.Printf("Executing DuckDB query: %q", query)
 		rows, err := stmt.Query()
 		if err != nil {
-			log.Printf("Failed to execute query: %v\nQuery was: %q", err, query)
 			return nil, fmt.Errorf("query execution failed: %v", err)
 		}
 		defer rows.Close()
@@ -635,10 +631,8 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 		// Get column names
 		columns, err := rows.Columns()
 		if err != nil {
-			log.Printf("Failed to get columns: %v", err)
 			return nil, fmt.Errorf("failed to get columns: %v", err)
 		}
-		log.Printf("Query returned columns: %v", columns)
 
 		// Prepare result structure
 		var result []map[string]interface{}
@@ -656,7 +650,6 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 
 			// Scan the row into the values
 			if err := rows.Scan(valuePtrs...); err != nil {
-				log.Printf("Failed to scan row: %v", err)
 				return nil, fmt.Errorf("error scanning row: %v", err)
 			}
 
@@ -679,11 +672,9 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 		}
 
 		if err := rows.Err(); err != nil {
-			log.Printf("Error iterating rows: %v", err)
 			return nil, fmt.Errorf("error iterating rows: %v", err)
 		}
 
-		log.Printf("Query returned %d rows", len(result))
 		return result, nil
 	}
 
@@ -691,52 +682,11 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 	// Parse the query
 	parsed, err := c.ParseQuery(query, dbName)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse query: %v", err)
 	}
-
-	// Find relevant files
-	files, err := c.FindRelevantFiles(ctx, parsed.DbName, parsed.Measurement, parsed.TimeRange)
-	if err != nil || len(files) == 0 {
-		return nil, fmt.Errorf("no relevant files found for query")
-	}
-
-	start := time.Now()
 
 	// Build the DuckDB query
-	var filesList strings.Builder
-	for i, file := range files {
-		if i > 0 {
-			filesList.WriteString(", ")
-		}
-		filesList.WriteString(fmt.Sprintf("'%s'", file))
-	}
-
-	// Split the original query and rebuild with file list
-	originalParts := strings.SplitN(query, " FROM ", 2)
-	var duckdbQuery string
-
-	if len(originalParts) >= 2 {
-		// Extract table name pattern to replace
-		tablePattern := fmt.Sprintf(`(?:%s\.)?%s\b`, parsed.DbName, parsed.Measurement)
-		tableRegex := regexp.MustCompile(tablePattern)
-		restOfQuery := tableRegex.ReplaceAllString(originalParts[1], "")
-
-		if len(strings.TrimSpace(restOfQuery)) > 0 {
-			// Fix timestamp format - ensure timestamps have quotes
-			timestampRegex := regexp.MustCompile(`([^'])(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)`)
-			restOfQuery = timestampRegex.ReplaceAllString(restOfQuery, "$1'$2'")
-
-			duckdbQuery = fmt.Sprintf("%s FROM read_parquet([%s], union_by_name=true) %s",
-				originalParts[0], filesList.String(), restOfQuery)
-		} else {
-			duckdbQuery = fmt.Sprintf("%s FROM read_parquet([%s], union_by_name=true)",
-				originalParts[0], filesList.String())
-		}
-	} else {
-		// Fallback to manually constructing the query
-		duckdbQuery = fmt.Sprintf("SELECT %s FROM read_parquet([%s], union_by_name=true)",
-			parsed.Columns, filesList.String())
-	}
+	duckdbQuery := fmt.Sprintf("SELECT %s FROM %s.%s", parsed.Columns, parsed.DbName, parsed.Measurement)
 
 	// Add WHERE conditions
 	if parsed.TimeRange.TimeCondition != "" || len(parsed.WhereConditions) > 0 {
@@ -775,9 +725,6 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 		duckdbQuery += fmt.Sprintf(" LIMIT %d", parsed.Limit)
 	}
 
-	log.Printf("Created DuckDB query in: %v. Query: %s", time.Since(start), duckdbQuery)
-	start = time.Now()
-
 	// Execute the query
 	stmt, err := c.DB.Prepare(duckdbQuery)
 	if err != nil {
@@ -796,9 +743,6 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 	if err != nil {
 		return nil, fmt.Errorf("failed to get columns: %v", err)
 	}
-
-	log.Printf("Retrieved first query result in: %v", time.Since(start))
-	start = time.Now()
 
 	// Prepare result structure
 	var result []map[string]interface{}
@@ -836,8 +780,6 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 
 		result = append(result, row)
 	}
-
-	log.Printf("Got query result in: %v", time.Since(start))
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating rows: %v", err)

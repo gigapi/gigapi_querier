@@ -21,11 +21,10 @@ gigapi-querier:
     - ./data:/data
   ports:
     - "8080:8080"
-    - "8081:8081"
+    - "8082:8082"
   environment:
     - DATA_DIR=/data
     - PORT=8080
-    - ICEBERG_PORT=8081
 ```
 
 ### Build
@@ -34,13 +33,12 @@ gigapi-querier:
 go build -o gigapi *.go
 
 # Start the server
-PORT=8080 ICEBERG_PORT=8081 DATA_DIR=./data ./gigapi
+PORT=8080 DATA_DIR=./data ./gigapi
 ```
 
 ### Configuration
 
 - `PORT`: Main server port (default: 8080)
-- `ICEBERG_PORT`: Iceberg API server port (default: 8081)
 - `FLIGHTSQL_PORT`: FlightSQL API server port (default: 8082)
 - `DATA_DIR`: Path to data directory (default: ./data)
 - `DISABLE_UI`: Disable web UI (optional)
@@ -53,21 +51,6 @@ PORT=8080 ICEBERG_PORT=8081 DATA_DIR=./data ./gigapi
 $ curl -X POST "http://localhost:8080/query?db=mydb" \
   -H "Content-Type: application/json"  \
   -d '{"query": "SELECT time, location, temperature FROM weather WHERE time >= '2025-04-01T00:00:00'"}'
-```
-
-### Iceberg Tables
-
-```bash
-# List tables
-$ curl "http://localhost:8081/iceberg/tables?namespace=mydb"
-
-# Get table schema
-$ curl "http://localhost:8081/iceberg/schema?namespace=mydb&table=mytable"
-
-# Query table
-$ curl -X POST "http://localhost:8081/iceberg/query" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "SELECT * FROM table", "namespace": "mydb", "table": "mytable"}'
 ```
 
 The GigAPI Querier can also be used in CLI mode to execute an individual query
@@ -103,7 +86,6 @@ A quick and dirty query user-interface is also provided for testing
 - File paths in metadata.json may contain absolute paths; the system handles both absolute and relative paths
 - Time fields are converted from nanosecond BigInt to ISO strings
 - Add `?debug=true` to query requests for detailed troubleshooting information
-- Iceberg support uses existing QueryClient and DuckDB for all operations
 
 -----
 
