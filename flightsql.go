@@ -6,7 +6,10 @@ import (
 	"log"
 	"net"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/apache/arrow/go/v14/arrow"
 	"github.com/apache/arrow/go/v14/arrow/array"
@@ -27,6 +30,9 @@ type FlightSQLServer struct {
 	flightsql.BaseServer
 	queryClient *QueryClient
 	mem        memory.Allocator
+	// Add result storage
+	results     map[string]arrow.Record
+	resultsLock sync.RWMutex
 }
 
 // mustEmbedUnimplementedFlightServiceServer implements the FlightServiceServer interface
@@ -37,6 +43,7 @@ func NewFlightSQLServer(queryClient *QueryClient) *FlightSQLServer {
 	return &FlightSQLServer{
 		queryClient: queryClient,
 		mem:        memory.DefaultAllocator,
+		results:    make(map[string]arrow.Record),
 	}
 }
 
@@ -138,9 +145,17 @@ func (s *FlightSQLServer) GetFlightInfo(ctx context.Context, desc *flight.Flight
 				return nil, fmt.Errorf("failed to convert results to Arrow format: %w", err)
 			}
 
+			// Generate a unique ticket
+			ticketID := fmt.Sprintf("query-%d", time.Now().UnixNano())
+
+			// Store the results
+			s.resultsLock.Lock()
+			s.results[ticketID] = recordBatch
+			s.resultsLock.Unlock()
+
 			// Create a ticket for the results
 			ticket := &flight.Ticket{
-				Ticket: []byte("query-results"),
+				Ticket: []byte(ticketID),
 			}
 
 			// Create the flight info
@@ -223,20 +238,30 @@ func (s *FlightSQLServer) GetFlightInfoStatement(ctx context.Context, cmd *fligh
 func (s *FlightSQLServer) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetServer) error {
 	log.Printf("DoGet called with ticket: %v", string(ticket.Ticket))
 	
-	// Get the schema and record batch from the ticket
-	schema, recordBatch, err := s.getResultsFromTicket(ticket)
-	if err != nil {
-		log.Printf("Failed to get results from ticket: %v", err)
-		return fmt.Errorf("failed to get results: %w", err)
+	// Get the results from storage
+	s.resultsLock.RLock()
+	recordBatch, exists := s.results[string(ticket.Ticket)]
+	s.resultsLock.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("no results found for ticket: %s", string(ticket.Ticket))
 	}
+
+	// Get the schema from the record batch
+	schema := recordBatch.Schema()
 
 	// Write the schema
 	writer := flight.NewRecordWriter(stream, ipc.WithSchema(schema))
-	err = writer.Write(recordBatch)
+	err := writer.Write(recordBatch)
 	if err != nil {
 		log.Printf("Failed to write record batch: %v", err)
 		return fmt.Errorf("failed to write record batch: %w", err)
 	}
+
+	// Clean up the stored results
+	s.resultsLock.Lock()
+	delete(s.results, string(ticket.Ticket))
+	s.resultsLock.Unlock()
 
 	log.Printf("Successfully wrote record batch with %d rows", recordBatch.NumRows())
 	return writer.Close()
@@ -263,25 +288,6 @@ func (s *FlightSQLServer) DoExchange(stream flight.FlightService_DoExchangeServe
 	return fmt.Errorf("exchange not supported")
 }
 
-// getResultsFromTicket retrieves the results associated with a ticket
-func (s *FlightSQLServer) getResultsFromTicket(ticket *flight.Ticket) (*arrow.Schema, arrow.Record, error) {
-	// For now, we'll just return an empty result
-	// In a real implementation, we would store the results somewhere and retrieve them here
-	fields := []arrow.Field{
-		{Name: "dummy", Type: arrow.BinaryTypes.String},
-	}
-	schema := arrow.NewSchema(fields, nil)
-
-	// Create an empty record batch
-	builder := array.NewStringBuilder(s.mem)
-	builder.AppendNull()
-	arr := builder.NewArray()
-	defer arr.Release()
-
-	recordBatch := array.NewRecord(schema, []arrow.Array{arr}, 1)
-	return schema, recordBatch, nil
-}
-
 // convertResultsToArrow converts our query results to Arrow format
 func convertResultsToArrow(results []map[string]interface{}) (*arrow.Schema, arrow.Record, error) {
 	if len(results) == 0 {
@@ -293,7 +299,7 @@ func convertResultsToArrow(results []map[string]interface{}) (*arrow.Schema, arr
 	for key := range results[0] {
 		fields = append(fields, arrow.Field{
 			Name: key,
-			Type: arrow.BinaryTypes.String,
+			Type: arrow.PrimitiveTypes.Int64, // Use Int64 for numeric values
 		})
 	}
 	schema := arrow.NewSchema(fields, nil)
@@ -302,13 +308,30 @@ func convertResultsToArrow(results []map[string]interface{}) (*arrow.Schema, arr
 	allocator := memory.DefaultAllocator
 	arrays := make([]arrow.Array, len(fields))
 	for i, field := range fields {
-		builder := array.NewStringBuilder(allocator)
+		builder := array.NewInt64Builder(allocator)
 		for _, row := range results {
 			val := row[field.Name]
 			if val == nil {
 				builder.AppendNull()
 			} else {
-				builder.Append(fmt.Sprint(val))
+				// Convert the value to int64
+				switch v := val.(type) {
+				case int64:
+					builder.Append(v)
+				case int:
+					builder.Append(int64(v))
+				case float64:
+					builder.Append(int64(v))
+				case string:
+					// Try to parse the string as a number
+					if num, err := strconv.ParseInt(v, 10, 64); err == nil {
+						builder.Append(num)
+					} else {
+						builder.AppendNull()
+					}
+				default:
+					builder.AppendNull()
+				}
 			}
 		}
 		arrays[i] = builder.NewArray()
