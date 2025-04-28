@@ -41,6 +41,7 @@ PORT=8080 ICEBERG_PORT=8081 DATA_DIR=./data ./gigapi
 
 - `PORT`: Main server port (default: 8080)
 - `ICEBERG_PORT`: Iceberg API server port (default: 8081)
+- `FLIGHTSQL_PORT`: FlightSQL API server port (default: 8082)
 - `DATA_DIR`: Path to data directory (default: ./data)
 - `DISABLE_UI`: Disable web UI (optional)
 
