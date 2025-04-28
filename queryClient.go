@@ -609,6 +609,71 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 		return results, nil
 	}
 
+	// Check if this is a simple query without FROM clause
+	if !strings.Contains(upperQuery, "FROM") {
+		// Execute the query directly with DuckDB
+		stmt, err := c.DB.Prepare(query)
+		if err != nil {
+			return nil, fmt.Errorf("failed to prepare query: %v", err)
+		}
+		defer stmt.Close()
+
+		rows, err := stmt.Query()
+		if err != nil {
+			return nil, fmt.Errorf("query execution failed: %v", err)
+		}
+		defer rows.Close()
+
+		// Get column names
+		columns, err := rows.Columns()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get columns: %v", err)
+		}
+
+		// Prepare result structure
+		var result []map[string]interface{}
+
+		// Process rows
+		for rows.Next() {
+			// Create a slice of interface{} to hold the values
+			values := make([]interface{}, len(columns))
+			valuePtrs := make([]interface{}, len(columns))
+
+			// Set up pointers to each interface{}
+			for i := range values {
+				valuePtrs[i] = &values[i]
+			}
+
+			// Scan the row into the values
+			if err := rows.Scan(valuePtrs...); err != nil {
+				return nil, fmt.Errorf("error scanning row: %v", err)
+			}
+
+			// Create a map for this row
+			row := make(map[string]interface{})
+
+			// Set each column in the map
+			for i, col := range columns {
+				val := values[i]
+
+				// Handle special cases for counts
+				if strings.Contains(col, "count") && val == nil {
+					row[col] = 0
+				} else {
+					row[col] = val
+				}
+			}
+
+			result = append(result, row)
+		}
+
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("error iterating rows: %v", err)
+		}
+
+		return result, nil
+	}
+
 	// Handle regular queries through DuckDB
 	// Parse the query
 	parsed, err := c.ParseQuery(query, dbName)
@@ -658,43 +723,43 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 		// Fallback to manually constructing the query
 		duckdbQuery = fmt.Sprintf("SELECT %s FROM read_parquet([%s], union_by_name=true)",
 			parsed.Columns, filesList.String())
+	}
 
-		// Add WHERE conditions
-		if parsed.TimeRange.TimeCondition != "" || len(parsed.WhereConditions) > 0 {
-			var conditions []string
+	// Add WHERE conditions
+	if parsed.TimeRange.TimeCondition != "" || len(parsed.WhereConditions) > 0 {
+		var conditions []string
 
-			if parsed.TimeRange.TimeCondition != "" {
-				conditions = append(conditions, parsed.TimeRange.TimeCondition)
-			}
-
-			if len(parsed.WhereConditions) > 0 {
-				// Fix timestamp format in WHERE clause
-				timestampRegex := regexp.MustCompile(`([^'])(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)`)
-				processedCond := timestampRegex.ReplaceAllString(parsed.WhereConditions, "$1'$2'")
-				conditions = append(conditions, processedCond)
-			}
-
-			if len(conditions) > 0 {
-				duckdbQuery += " WHERE " + strings.Join(conditions, " AND ")
-			}
+		if parsed.TimeRange.TimeCondition != "" {
+			conditions = append(conditions, parsed.TimeRange.TimeCondition)
 		}
 
-		// Add GROUP BY, HAVING, ORDER BY, and LIMIT
-		if len(parsed.GroupBy) > 0 {
-			duckdbQuery += " GROUP BY " + parsed.GroupBy
+		if len(parsed.WhereConditions) > 0 {
+			// Fix timestamp format in WHERE clause
+			timestampRegex := regexp.MustCompile(`([^'])(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)`)
+			processedCond := timestampRegex.ReplaceAllString(parsed.WhereConditions, "$1'$2'")
+			conditions = append(conditions, processedCond)
 		}
 
-		if len(parsed.Having) > 0 {
-			duckdbQuery += " HAVING " + parsed.Having
+		if len(conditions) > 0 {
+			duckdbQuery += " WHERE " + strings.Join(conditions, " AND ")
 		}
+	}
 
-		if len(parsed.OrderBy) > 0 {
-			duckdbQuery += " ORDER BY " + parsed.OrderBy
-		}
+	// Add GROUP BY, HAVING, ORDER BY, and LIMIT
+	if len(parsed.GroupBy) > 0 {
+		duckdbQuery += " GROUP BY " + parsed.GroupBy
+	}
 
-		if parsed.Limit > 0 {
-			duckdbQuery += fmt.Sprintf(" LIMIT %d", parsed.Limit)
-		}
+	if len(parsed.Having) > 0 {
+		duckdbQuery += " HAVING " + parsed.Having
+	}
+
+	if len(parsed.OrderBy) > 0 {
+		duckdbQuery += " ORDER BY " + parsed.OrderBy
+	}
+
+	if parsed.Limit > 0 {
+		duckdbQuery += fmt.Sprintf(" LIMIT %d", parsed.Limit)
 	}
 
 	Debugf(ctx, "Created DuckDB query in: %v. Query: %s", time.Since(start), duckdbQuery)
