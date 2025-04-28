@@ -568,8 +568,11 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 		ctx = context.Background()
 	}
 
-	// Check for special commands
+	// Clean up the query string
 	query = strings.TrimSpace(query)
+	query = strings.ReplaceAll(query, "\n", " ")
+	query = strings.ReplaceAll(query, "\r", " ")
+	query = regexp.MustCompile(`\s+`).ReplaceAllString(query, " ")
 	upperQuery := strings.ToUpper(query)
 
 	// Handle special commands
