@@ -127,7 +127,7 @@ func (s *FlightSQLServer) GetFlightInfo(ctx context.Context, desc *flight.Flight
 			}, query)
 			
 			// Execute the query using our existing QueryClient
-			results, err := s.queryClient.Query(ctx, query, "mydb") // Using default database for now
+			results, err := s.queryClient.Query(ctx, query, "") // Pass empty string to let QueryClient handle database resolution
 			if err != nil {
 				return nil, fmt.Errorf("failed to execute query: %w", err)
 			}
@@ -186,7 +186,7 @@ func (s *FlightSQLServer) GetFlightInfoStatement(ctx context.Context, cmd *fligh
 	query := string(desc.Cmd)
 	
 	// Execute the query using our existing QueryClient
-	results, err := s.queryClient.Query(ctx, query, "mydb") // Using default database for now
+	results, err := s.queryClient.Query(ctx, query, "") // Pass empty string to let QueryClient handle database resolution
 	if err != nil {
 		log.Printf("Query execution failed: %v", err)
 		return nil, fmt.Errorf("failed to execute query: %w", err)
