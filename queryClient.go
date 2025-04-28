@@ -686,7 +686,7 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 	}
 
 	// Build the DuckDB query
-	duckdbQuery := fmt.Sprintf("SELECT %s FROM %s.%s", parsed.Columns, parsed.DbName, parsed.Measurement)
+	duckdbQuery := fmt.Sprintf("SELECT %s FROM %s.%s", parsed.Columns, dbName, parsed.Measurement)
 
 	// Add WHERE conditions
 	if parsed.TimeRange.TimeCondition != "" || len(parsed.WhereConditions) > 0 {
