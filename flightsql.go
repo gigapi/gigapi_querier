@@ -113,7 +113,15 @@ func (s *FlightSQLServer) GetFlightInfo(ctx context.Context, desc *flight.Flight
 			query = strings.TrimSpace(query)
 			query = strings.ReplaceAll(query, "\n", " ")
 			query = strings.ReplaceAll(query, "\r", " ")
+			query = strings.ReplaceAll(query, "\b", "") // Remove backspace characters
 			query = regexp.MustCompile(`\s+`).ReplaceAllString(query, " ")
+			// Remove any non-printable characters
+			query = strings.Map(func(r rune) rune {
+				if r < 32 || r > 126 {
+					return -1
+				}
+				return r
+			}, query)
 			log.Printf("Executing SQL query: %v", query)
 			
 			// Execute the query using our existing QueryClient
