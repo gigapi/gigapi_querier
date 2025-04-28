@@ -38,28 +38,34 @@ func NewFlightSQLServer(queryClient *QueryClient) *FlightSQLServer {
 
 // PollFlightInfo implements the FlightService interface
 func (s *FlightSQLServer) PollFlightInfo(ctx context.Context, desc *flight.FlightDescriptor) (*flight.PollInfo, error) {
+	log.Printf("PollFlightInfo called with descriptor type: %v, path: %v, cmd: %v", 
+		desc.Type, desc.Path, string(desc.Cmd))
 	// For now, we don't support polling flight info
 	return nil, nil
 }
 
 // ListFlights implements the FlightService interface
 func (s *FlightSQLServer) ListFlights(criteria *flight.Criteria, stream flight.FlightService_ListFlightsServer) error {
+	log.Printf("ListFlights called with criteria: %v", criteria)
 	// For now, we don't support listing flights
 	return nil
 }
 
 // ListActions implements the FlightService interface
 func (s *FlightSQLServer) ListActions(request *flight.Empty, stream flight.FlightService_ListActionsServer) error {
+	log.Printf("ListActions called")
 	// For now, we don't support any actions
 	return nil
 }
 
 // Handshake implements the FlightService interface
 func (s *FlightSQLServer) Handshake(stream flight.FlightService_HandshakeServer) error {
+	log.Printf("Handshake called")
 	// For now, we'll just echo back any handshake request
 	for {
 		req, err := stream.Recv()
 		if err != nil {
+			log.Printf("Handshake receive error: %v", err)
 			return err
 		}
 
@@ -67,6 +73,7 @@ func (s *FlightSQLServer) Handshake(stream flight.FlightService_HandshakeServer)
 			Payload: req.Payload,
 		})
 		if err != nil {
+			log.Printf("Handshake send error: %v", err)
 			return err
 		}
 	}
@@ -74,30 +81,40 @@ func (s *FlightSQLServer) Handshake(stream flight.FlightService_HandshakeServer)
 
 // GetSchema implements the FlightService interface
 func (s *FlightSQLServer) GetSchema(ctx context.Context, desc *flight.FlightDescriptor) (*flight.SchemaResult, error) {
+	log.Printf("GetSchema called with descriptor type: %v, path: %v, cmd: %v", 
+		desc.Type, desc.Path, string(desc.Cmd))
 	// For now, we don't support schema requests
 	return nil, fmt.Errorf("schema requests not supported")
 }
 
 // GetFlightInfo implements the FlightService interface
 func (s *FlightSQLServer) GetFlightInfo(ctx context.Context, desc *flight.FlightDescriptor) (*flight.FlightInfo, error) {
+	log.Printf("GetFlightInfo called with descriptor type: %v, path: %v, cmd: %v", 
+		desc.Type, desc.Path, string(desc.Cmd))
+	
 	// For now, we don't support any other flight info requests
-	return nil, fmt.Errorf("unsupported flight descriptor type")
+	return nil, fmt.Errorf("unsupported flight descriptor type: %v", desc.Type)
 }
 
 // GetFlightInfoStatement implements the FlightSQL server interface for executing SQL statements
 func (s *FlightSQLServer) GetFlightInfoStatement(ctx context.Context, cmd *flightsql.StatementQuery, desc *flight.FlightDescriptor) (*flight.FlightInfo, error) {
+	log.Printf("GetFlightInfoStatement called with descriptor type: %v, path: %v, cmd: %v", 
+		desc.Type, desc.Path, string(desc.Cmd))
+	
 	// Extract query from command
 	query := string(desc.Cmd)
 	
 	// Execute the query using our existing QueryClient
 	results, err := s.queryClient.Query(ctx, query, "mydb") // Using default database for now
 	if err != nil {
+		log.Printf("Query execution failed: %v", err)
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
 
 	// Convert results to Arrow format
 	_, recordBatch, err := convertResultsToArrow(results)
 	if err != nil {
+		log.Printf("Failed to convert results to Arrow format: %v", err)
 		return nil, fmt.Errorf("failed to convert results to Arrow format: %w", err)
 	}
 
@@ -124,14 +141,18 @@ func (s *FlightSQLServer) GetFlightInfoStatement(ctx context.Context, cmd *fligh
 		Schema:       []byte{}, // Empty schema, will be sent in DoGet
 	}
 
+	log.Printf("Returning flight info with %d records", recordBatch.NumRows())
 	return info, nil
 }
 
 // DoGet implements the FlightSQL server interface for retrieving data
 func (s *FlightSQLServer) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetServer) error {
+	log.Printf("DoGet called with ticket: %v", string(ticket.Ticket))
+	
 	// Get the schema and record batch from the ticket
 	schema, recordBatch, err := s.getResultsFromTicket(ticket)
 	if err != nil {
+		log.Printf("Failed to get results from ticket: %v", err)
 		return fmt.Errorf("failed to get results: %w", err)
 	}
 
@@ -139,26 +160,31 @@ func (s *FlightSQLServer) DoGet(ticket *flight.Ticket, stream flight.FlightServi
 	writer := flight.NewRecordWriter(stream, ipc.WithSchema(schema))
 	err = writer.Write(recordBatch)
 	if err != nil {
+		log.Printf("Failed to write record batch: %v", err)
 		return fmt.Errorf("failed to write record batch: %w", err)
 	}
 
+	log.Printf("Successfully wrote record batch with %d rows", recordBatch.NumRows())
 	return writer.Close()
 }
 
 // DoPut implements the FlightService interface
 func (s *FlightSQLServer) DoPut(stream flight.FlightService_DoPutServer) error {
+	log.Printf("DoPut called")
 	// We don't support putting data yet
 	return fmt.Errorf("put not supported")
 }
 
 // DoAction implements the FlightService interface
 func (s *FlightSQLServer) DoAction(action *flight.Action, stream flight.FlightService_DoActionServer) error {
+	log.Printf("DoAction called with action type: %v", action.Type)
 	// We don't support any actions yet
 	return fmt.Errorf("action %s not supported", action.Type)
 }
 
 // DoExchange implements the FlightService interface
 func (s *FlightSQLServer) DoExchange(stream flight.FlightService_DoExchangeServer) error {
+	log.Printf("DoExchange called")
 	// We don't support exchange yet
 	return fmt.Errorf("exchange not supported")
 }
