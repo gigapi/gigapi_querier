@@ -686,14 +686,7 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 	}
 
 	// Build the DuckDB query
-	var duckdbQuery string
-	if parsed.DbName != "" {
-		// If the query already has a database name, use it
-		duckdbQuery = fmt.Sprintf("SELECT %s FROM %s.%s", parsed.Columns, parsed.DbName, parsed.Measurement)
-	} else {
-		// Otherwise, use the provided database name
-		duckdbQuery = fmt.Sprintf("SELECT %s FROM %s.%s", parsed.Columns, dbName, parsed.Measurement)
-	}
+	duckdbQuery := fmt.Sprintf("SELECT %s FROM %s.%s", parsed.Columns, parsed.DbName, parsed.Measurement)
 
 	// Add WHERE conditions
 	if parsed.TimeRange.TimeCondition != "" || len(parsed.WhereConditions) > 0 {
