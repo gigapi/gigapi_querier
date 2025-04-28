@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -305,16 +306,16 @@ func (q *QueryClient) FindRelevantFiles(ctx context.Context, dbName, measurement
 	timeRange TimeRange) ([]string, error) {
 	// If no time range specified, get all files
 	if timeRange.Start == nil && timeRange.End == nil {
-		Infof(ctx, "No time range specified, getting all files for %s.%s", dbName, measurement)
+		log.Printf("No time range specified, getting all files for %s.%s", dbName, measurement)
 		return q.findAllFiles(ctx, dbName, measurement)
 	}
 
 	var relevantFiles []string
-	Infof(ctx, "Getting relevant files for %s.%s within time range %v to %v", dbName, measurement,
+	log.Printf("Getting relevant files for %s.%s within time range %v to %v", dbName, measurement,
 		time.Unix(0, *timeRange.Start), time.Unix(0, *timeRange.End))
 	start := time.Now()
 	defer func() {
-		Infof(ctx, "Found %d files in: %v", len(relevantFiles), time.Since(start))
+		log.Printf("Found %d files in: %v", len(relevantFiles), time.Since(start))
 	}()
 
 	// Convert nanosecond timestamps to time.Time for directory parsing
@@ -332,55 +333,55 @@ func (q *QueryClient) FindRelevantFiles(ctx context.Context, dbName, measurement
 	}
 
 	// Get all date directories that might contain relevant data
-	Infof(ctx, "Looking for date directories between %v and %v", startDate, endDate)
+	log.Printf("Looking for date directories between %v and %v", startDate, endDate)
 	dateDirectories, err := q.getDateDirectoriesInRange(dbName, measurement, startDate, endDate)
 	if err != nil {
-		Errorf(ctx, "Failed to get date directories: %v", err)
+		log.Printf("Failed to get date directories: %v", err)
 		return nil, err
 	}
-	Infof(ctx, "Found %d date directories", len(dateDirectories))
+	log.Printf("Found %d date directories", len(dateDirectories))
 
 	for _, dateDir := range dateDirectories {
 		// For each date directory, get all hour directories
 		datePath := filepath.Join(q.DataDir, dbName, measurement, dateDir)
-		Infof(ctx, "Processing date directory: %s", datePath)
+		log.Printf("Processing date directory: %s", datePath)
 		
 		hourDirs, err := q.getHourDirectoriesInRange(datePath, startDate, endDate)
 		if err != nil {
-			Errorf(ctx, "Failed to get hour directories for %s: %v", datePath, err)
+			log.Printf("Failed to get hour directories for %s: %v", datePath, err)
 			continue // Skip this directory on error
 		}
-		Infof(ctx, "Found %d hour directories in %s", len(hourDirs), dateDir)
+		log.Printf("Found %d hour directories in %s", len(hourDirs), dateDir)
 
 		for _, hourDir := range hourDirs {
 			hourPath := filepath.Join(datePath, hourDir)
-			Infof(ctx, "Processing hour directory: %s", hourPath)
+			log.Printf("Processing hour directory: %s", hourPath)
 
 			// Read metadata.json
 			metadataPath := filepath.Join(hourPath, "metadata.json")
 			if _, err := os.Stat(metadataPath); err == nil {
-				Infof(ctx, "Found metadata.json in %s", hourPath)
+				log.Printf("Found metadata.json in %s", hourPath)
 				_relevantFiles, err := q.enumFolderWithMetadata(metadataPath, timeRange)
 				if err == nil {
-					Infof(ctx, "Found %d files in metadata.json", len(_relevantFiles))
+					log.Printf("Found %d files in metadata.json", len(_relevantFiles))
 					relevantFiles = append(relevantFiles, _relevantFiles...)
 					continue
 				}
-				Errorf(ctx, "Failed to read metadata.json: %v", err)
+				log.Printf("Failed to read metadata.json: %v", err)
 			}
 
 			_relevantFiles, err := q.enumFolderNoMetadata(hourPath)
 			if err == nil {
-				Infof(ctx, "Found %d files without metadata", len(_relevantFiles))
+				log.Printf("Found %d files without metadata", len(_relevantFiles))
 				relevantFiles = append(relevantFiles, _relevantFiles...)
 				continue
 			}
-			Errorf(ctx, "Failed to enumerate folder: %v", err)
+			log.Printf("Failed to enumerate folder: %v", err)
 		}
 	}
 
 	if len(relevantFiles) == 0 {
-		Errorf(ctx, "No files found in any directory for %s.%s", dbName, measurement)
+		log.Printf("No files found in any directory for %s.%s", dbName, measurement)
 	}
 
 	return relevantFiles, nil
@@ -391,10 +392,10 @@ func (q *QueryClient) findAllFiles(ctx context.Context, dbName, measurement stri
 	var allFiles []string
 	basePath := filepath.Join(q.DataDir, dbName, measurement)
 
-	Debugf(ctx, "Getting all files for %s.%s", dbName, measurement)
+	log.Printf("Getting all files for %s.%s", dbName, measurement)
 	start := time.Now()
 	defer func() {
-		Debugf(ctx, "Found %d files in: %v", len(allFiles), time.Since(start))
+		log.Printf("Found %d files in: %v", len(allFiles), time.Since(start))
 	}()
 
 	if _, err := os.Stat(basePath); os.IsNotExist(err) {
@@ -615,14 +616,18 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 	// Check if this is a simple query without FROM clause
 	if !strings.Contains(upperQuery, "FROM") {
 		// Execute the query directly with DuckDB
+		log.Printf("Preparing DuckDB query: %q", query)
 		stmt, err := c.DB.Prepare(query)
 		if err != nil {
+			log.Printf("Failed to prepare query: %v\nQuery was: %q", err, query)
 			return nil, fmt.Errorf("failed to prepare query: %v", err)
 		}
 		defer stmt.Close()
 
+		log.Printf("Executing DuckDB query: %q", query)
 		rows, err := stmt.Query()
 		if err != nil {
+			log.Printf("Failed to execute query: %v\nQuery was: %q", err, query)
 			return nil, fmt.Errorf("query execution failed: %v", err)
 		}
 		defer rows.Close()
@@ -630,8 +635,10 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 		// Get column names
 		columns, err := rows.Columns()
 		if err != nil {
+			log.Printf("Failed to get columns: %v", err)
 			return nil, fmt.Errorf("failed to get columns: %v", err)
 		}
+		log.Printf("Query returned columns: %v", columns)
 
 		// Prepare result structure
 		var result []map[string]interface{}
@@ -649,6 +656,7 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 
 			// Scan the row into the values
 			if err := rows.Scan(valuePtrs...); err != nil {
+				log.Printf("Failed to scan row: %v", err)
 				return nil, fmt.Errorf("error scanning row: %v", err)
 			}
 
@@ -671,9 +679,11 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 		}
 
 		if err := rows.Err(); err != nil {
+			log.Printf("Error iterating rows: %v", err)
 			return nil, fmt.Errorf("error iterating rows: %v", err)
 		}
 
+		log.Printf("Query returned %d rows", len(result))
 		return result, nil
 	}
 
@@ -765,7 +775,7 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 		duckdbQuery += fmt.Sprintf(" LIMIT %d", parsed.Limit)
 	}
 
-	Debugf(ctx, "Created DuckDB query in: %v. Query: %s", time.Since(start), duckdbQuery)
+	log.Printf("Created DuckDB query in: %v. Query: %s", time.Since(start), duckdbQuery)
 	start = time.Now()
 
 	// Execute the query
@@ -787,7 +797,7 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 		return nil, fmt.Errorf("failed to get columns: %v", err)
 	}
 
-	Debugf(ctx, "Retrieved first query result in: %v", time.Since(start))
+	log.Printf("Retrieved first query result in: %v", time.Since(start))
 	start = time.Now()
 
 	// Prepare result structure
@@ -827,7 +837,7 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 		result = append(result, row)
 	}
 
-	Debugf(ctx, "Got query result in: %v", time.Since(start))
+	log.Printf("Got query result in: %v", time.Since(start))
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating rows: %v", err)
