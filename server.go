@@ -419,6 +419,11 @@ func main() {
 		icebergPort = "8081"
 	}
 
+	flightsqlPort := os.Getenv("FLIGHTSQL_PORT")
+	if flightsqlPort == "" {
+		flightsqlPort = "8082"
+	}
+
 	dataDir := os.Getenv("DATA_DIR")
 	if dataDir == "" {
 		dataDir = "./data"
@@ -489,9 +494,25 @@ func main() {
 
 	// Start Iceberg server
 	Infof(ctx, "Iceberg API server running at http://localhost:%s", icebergPort)
-	err = http.ListenAndServe(":"+icebergPort, icebergMux)
+	go func() {
+		err = http.ListenAndServe(":"+icebergPort, icebergMux)
+		if err != nil {
+			Errorf(ctx, "Failed to start Iceberg server: %v", err)
+			os.Exit(1)
+		}
+	}()
+
+	// Start FlightSQL server
+	flightsqlPortInt, err := strconv.Atoi(flightsqlPort)
 	if err != nil {
-		Errorf(ctx, "Failed to start Iceberg server: %v", err)
+		Errorf(ctx, "Invalid FlightSQL port: %v", err)
+		os.Exit(1)
+	}
+
+	Infof(ctx, "FlightSQL server running on port %s", flightsqlPort)
+	err = StartFlightSQLServer(flightsqlPortInt, client)
+	if err != nil {
+		Errorf(ctx, "Failed to start FlightSQL server: %v", err)
 		os.Exit(1)
 	}
 }

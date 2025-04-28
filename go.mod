@@ -3,8 +3,10 @@ module github.com/gigapi/gigapi-querier
 go 1.24.1
 
 require (
+	github.com/apache/arrow/go/v14 v14.0.2
 	github.com/marcboeker/go-duckdb/v2 v2.2.0
 	go.uber.org/zap v1.27.0
+	google.golang.org/grpc v1.69.2
 )
 
 require (
@@ -28,8 +30,12 @@ require (
 	go.uber.org/multierr v1.10.0 // indirect
 	golang.org/x/exp v0.0.0-20250128182459-e0ece0dbea4c // indirect
 	golang.org/x/mod v0.22.0 // indirect
+	golang.org/x/net v0.34.0 // indirect
 	golang.org/x/sync v0.10.0 // indirect
 	golang.org/x/sys v0.29.0 // indirect
+	golang.org/x/text v0.21.0 // indirect
 	golang.org/x/tools v0.29.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20241104194629-dd2ea8efbc28 // indirect
+	google.golang.org/protobuf v1.36.1 // indirect
 )
