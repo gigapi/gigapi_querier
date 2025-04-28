@@ -107,11 +107,8 @@ func (s *FlightSQLServer) GetFlightInfo(ctx context.Context, desc *flight.Flight
 
 		// Check if this is a CommandStatementQuery
 		if any.TypeUrl == "type.googleapis.com/arrow.flight.protocol.sql.CommandStatementQuery" {
-			// The query is in the path
-			if len(desc.Path) == 0 {
-				return nil, fmt.Errorf("no query found in path")
-			}
-			query := string(desc.Path[0])
+			// The query is in the Any message's value
+			query := string(any.Value)
 			// Clean up the query string
 			query = strings.TrimSpace(query)
 			query = strings.ReplaceAll(query, "\n", " ")
