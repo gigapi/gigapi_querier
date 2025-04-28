@@ -93,49 +93,55 @@ func (s *FlightSQLServer) GetFlightInfo(ctx context.Context, desc *flight.Flight
 		desc.Type, desc.Path, string(desc.Cmd))
 	
 	// Handle SQL query command
-	if desc.Type == flight.DescriptorCMD && string(desc.Cmd) == "Ctype.googleapis.com/arrow.flight.protocol.sql.CommandStatementQuery" {
-		// Extract the actual SQL query from the descriptor
-		query := string(desc.Cmd)
-		if len(query) > 0 {
-			// Execute the query using our existing QueryClient
-			results, err := s.queryClient.Query(ctx, query, "mydb") // Using default database for now
-			if err != nil {
-				log.Printf("Query execution failed: %v", err)
-				return nil, fmt.Errorf("failed to execute query: %w", err)
-			}
+	if desc.Type == flight.DescriptorCMD {
+		// Parse the command to get the actual SQL query
+		cmdType := string(desc.Cmd)
+		if cmdType == "Ctype.googleapis.com/arrow.flight.protocol.sql.CommandStatementQuery" {
+			// The actual SQL query is in the descriptor's path
+			if len(desc.Path) > 0 {
+				query := string(desc.Path[0])
+				log.Printf("Executing SQL query: %v", query)
+				
+				// Execute the query using our existing QueryClient
+				results, err := s.queryClient.Query(ctx, query, "mydb") // Using default database for now
+				if err != nil {
+					log.Printf("Query execution failed: %v", err)
+					return nil, fmt.Errorf("failed to execute query: %w", err)
+				}
 
-			// Convert results to Arrow format
-			_, recordBatch, err := convertResultsToArrow(results)
-			if err != nil {
-				log.Printf("Failed to convert results to Arrow format: %v", err)
-				return nil, fmt.Errorf("failed to convert results to Arrow format: %w", err)
-			}
+				// Convert results to Arrow format
+				_, recordBatch, err := convertResultsToArrow(results)
+				if err != nil {
+					log.Printf("Failed to convert results to Arrow format: %v", err)
+					return nil, fmt.Errorf("failed to convert results to Arrow format: %w", err)
+				}
 
-			// Create a ticket for the results
-			ticket := &flight.Ticket{
-				Ticket: []byte("query-results"),
-			}
+				// Create a ticket for the results
+				ticket := &flight.Ticket{
+					Ticket: []byte("query-results"),
+				}
 
-			// Create the flight info
-			info := &flight.FlightInfo{
-				FlightDescriptor: desc,
-				Endpoint: []*flight.FlightEndpoint{
-					{
-						Ticket: ticket,
-						Location: []*flight.Location{
-							{
-								Uri: "grpc://localhost:8082",
+				// Create the flight info
+				info := &flight.FlightInfo{
+					FlightDescriptor: desc,
+					Endpoint: []*flight.FlightEndpoint{
+						{
+							Ticket: ticket,
+							Location: []*flight.Location{
+								{
+									Uri: "grpc://localhost:8082",
+								},
 							},
 						},
 					},
-				},
-				TotalRecords: recordBatch.NumRows(),
-				TotalBytes:   -1,
-				Schema:       []byte{}, // Empty schema, will be sent in DoGet
-			}
+					TotalRecords: recordBatch.NumRows(),
+					TotalBytes:   -1,
+					Schema:       []byte{}, // Empty schema, will be sent in DoGet
+				}
 
-			log.Printf("Returning flight info with %d records", recordBatch.NumRows())
-			return info, nil
+				log.Printf("Returning flight info with %d records", recordBatch.NumRows())
+				return info, nil
+			}
 		}
 	}
 	
