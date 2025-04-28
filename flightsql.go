@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"regexp"
+	"strings"
 
 	"github.com/apache/arrow/go/v14/arrow"
 	"github.com/apache/arrow/go/v14/arrow/array"
@@ -107,11 +109,15 @@ func (s *FlightSQLServer) GetFlightInfo(ctx context.Context, desc *flight.Flight
 		if any.TypeUrl == "type.googleapis.com/arrow.flight.protocol.sql.CommandStatementQuery" {
 			// The query is in the Any message's value
 			query := string(any.Value)
+			// Clean up the query string
+			query = strings.TrimSpace(query)
+			query = strings.ReplaceAll(query, "\n", " ")
+			query = strings.ReplaceAll(query, "\r", " ")
+			query = regexp.MustCompile(`\s+`).ReplaceAllString(query, " ")
 			log.Printf("Executing SQL query: %v", query)
 			
 			// Execute the query using our existing QueryClient
-			// For FlightSQL, we'll pass the query directly to DuckDB
-			results, err := s.queryClient.Query(ctx, query, "mydb") // Using default database
+			results, err := s.queryClient.Query(ctx, query, "mydb") // Using default database for now
 			if err != nil {
 				log.Printf("Query execution failed: %v", err)
 				return nil, fmt.Errorf("failed to execute query: %w", err)
