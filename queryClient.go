@@ -40,11 +40,10 @@ func NewQueryClient(dataDir string) *QueryClient {
 // Initialize sets up the DuckDB connection
 func (q *QueryClient) Initialize() error {
 	var err error
-	db, err = sql.Open("duckdb", "?access_mode=READ_WRITE")
+	q.DB, err = sql.Open("duckdb", "?access_mode=READ_WRITE")
 	if err != nil {
 		return fmt.Errorf("failed to initialize DuckDB: %v", err)
 	}
-	q.DB = db
 	return nil
 }
 
@@ -563,7 +562,7 @@ func (q *QueryClient) getHourDirectoriesInRange(datePath string, startDate, endD
 }
 
 // Query executes a query against the database
-func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[string]interface{}, error) {
+func (q *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[string]interface{}, error) {
 	// Ensure we have a context
 	if ctx == nil {
 		ctx = context.Background()
@@ -579,7 +578,7 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 	// Handle special commands
 	switch upperQuery {
 	case "SHOW DATABASES":
-		entries, err := os.ReadDir(c.DataDir)
+		entries, err := os.ReadDir(q.DataDir)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read data directory: %v", err)
 		}
@@ -596,7 +595,7 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 
 	case "SHOW TABLES":
 		// List directories inside the database folder
-		dbPath := filepath.Join(c.DataDir, dbName)
+		dbPath := filepath.Join(q.DataDir, dbName)
 		entries, err := os.ReadDir(dbPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read database directory: %v", err)
@@ -616,7 +615,7 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 	// Check if this is a simple query without FROM clause
 	if !strings.Contains(upperQuery, "FROM") {
 		// Execute the query directly with DuckDB
-		stmt, err := c.DB.Prepare(query)
+		stmt, err := q.DB.Prepare(query)
 		if err != nil {
 			return nil, fmt.Errorf("failed to prepare query: %v", err)
 		}
@@ -680,7 +679,7 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 
 	// Handle regular queries through DuckDB
 	// Parse the query
-	parsed, err := c.ParseQuery(query, dbName)
+	parsed, err := q.ParseQuery(query, dbName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse query: %v", err)
 	}
@@ -726,7 +725,7 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 	}
 
 	// Execute the query
-	stmt, err := c.DB.Prepare(duckdbQuery)
+	stmt, err := q.DB.Prepare(duckdbQuery)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare query: %v", err)
 	}
