@@ -1,12 +1,11 @@
 // server.go
-package main
+package querier
 
 import (
-	"context"
 	_ "embed"
 	"encoding/json"
-	"flag"
 	"fmt"
+	"github.com/gigapi/gigapi-querier/core"
 	"log"
 	"net/http"
 	"os"
@@ -65,9 +64,9 @@ func addCORSHeaders(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 }
 
-// handleQuery handles the /query endpoint
-func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
-	ctx := WithDefaultLogger(r.Context(), fmt.Sprintf("req-%d", atomic.AddInt32(&reqId, 1)))
+// HandleQuery Handles the /query endpoint
+func (s *Server) HandleQuery(w http.ResponseWriter, r *http.Request) {
+	ctx := core.WithDefaultLogger(r.Context(), fmt.Sprintf("req-%d", atomic.AddInt32(&reqId, 1)))
 	// Add CORS headers
 	addCORSHeaders(w)
 
@@ -111,8 +110,8 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Process results to handle special types for JSON
-	processedResults := processResultsForJSON(results)
+	// Process results to Handle special types for JSON
+	processedResults := ProcessResultsForJSON(results)
 
 	// Send response
 	w.Header().Set("Content-Type", "application/json")
@@ -121,8 +120,8 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// processResultsForJSON prepares results for JSON serialization
-func processResultsForJSON(results []map[string]interface{}) []map[string]interface{} {
+// ProcessResultsForJSON prepares results for JSON serialization
+func ProcessResultsForJSON(results []map[string]interface{}) []map[string]interface{} {
 	processedResults := make([]map[string]interface{}, len(results))
 
 	for i, row := range results {
@@ -160,7 +159,7 @@ func sendErrorResponse(w http.ResponseWriter, message string, statusCode int) {
 }
 
 // Health check endpoint
-func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+func (s *Server) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	// Add CORS headers
 	addCORSHeaders(w)
 
@@ -177,8 +176,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleUI serves the main UI page
-func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
+// HandleUI serves the main UI page
+func (s *Server) HandleUI(w http.ResponseWriter, r *http.Request) {
 	// If UI is disabled, return 404
 	if s.DisableUI {
 		http.NotFound(w, r)
@@ -207,94 +206,4 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 // Close the server and release resources
 func (s *Server) Close() error {
 	return s.QueryClient.Close()
-}
-
-func main() {
-	ctx := WithDefaultLogger(context.Background(), "main")
-	// Add command line flags
-	queryFlag := flag.String("query", "", "Execute a single query and exit")
-	dbFlag := flag.String("db", "mydb", "Database name to query")
-	flag.Parse()
-
-	// Get configuration from environment variables
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
-	flightsqlPort := os.Getenv("FLIGHTSQL_PORT")
-	if flightsqlPort == "" {
-		flightsqlPort = "8082"
-	}
-
-	dataDir := os.Getenv("DATA_DIR")
-	if dataDir == "" {
-		dataDir = "./data"
-	}
-
-	// Create QueryClient
-	client := NewQueryClient(dataDir)
-	err := client.Initialize()
-	if err != nil {
-		Errorf(ctx, "Failed to initialize query client: %v", err)
-		os.Exit(1)
-	}
-	defer client.Close()
-
-	// If query flag is provided, execute query and exit
-	if *queryFlag != "" {
-		results, err := client.Query(ctx, *queryFlag, *dbFlag)
-		if err != nil {
-			log.Fatalf("Query error: %v", err)
-		}
-
-		// Process and print results as JSON
-		processedResults := processResultsForJSON(results)
-		jsonData, err := json.MarshalIndent(processedResults, "", "  ")
-		if err != nil {
-			log.Fatalf("Failed to marshal results: %v", err)
-		}
-		fmt.Println(string(jsonData))
-		return
-	}
-
-	// Create server for HTTP mode
-	server, err := NewServer(dataDir)
-	if err != nil {
-		Errorf(ctx, "Failed to initialize server: %v", err)
-		os.Exit(1)
-	}
-	defer server.Close()
-
-	// Create a new mux for routing
-	mux := http.NewServeMux()
-
-	// Set up routes
-	mux.HandleFunc("/", server.handleUI)  // Serve UI at root path
-	mux.HandleFunc("/health", server.handleHealth)
-	mux.HandleFunc("/query", server.handleQuery)
-
-	// Start main server
-	Infof(ctx, "GigAPI server running at http://localhost:%s", port)
-	go func() {
-		err = http.ListenAndServe(":"+port, mux)
-		if err != nil {
-			Errorf(ctx, "Failed to start main server: %v", err)
-			os.Exit(1)
-		}
-	}()
-
-	// Start FlightSQL server
-	flightsqlPortInt, err := strconv.Atoi(flightsqlPort)
-	if err != nil {
-		Errorf(ctx, "Invalid FlightSQL port: %v", err)
-		os.Exit(1)
-	}
-
-	Infof(ctx, "FlightSQL server running on port %s", flightsqlPort)
-	err = StartFlightSQLServer(flightsqlPortInt, client)
-	if err != nil {
-		Errorf(ctx, "Failed to start FlightSQL server: %v", err)
-		os.Exit(1)
-	}
 }

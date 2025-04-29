@@ -1,4 +1,4 @@
-package main
+package querier
 
 import (
 	"context"
@@ -14,10 +14,10 @@ import (
 	"github.com/apache/arrow/go/v14/arrow"
 	"github.com/apache/arrow/go/v14/arrow/array"
 	"github.com/apache/arrow/go/v14/arrow/flight"
-	flightgen "github.com/apache/arrow/go/v14/arrow/flight/gen/flight"
 	"github.com/apache/arrow/go/v14/arrow/flight/flightsql"
-	"github.com/apache/arrow/go/v14/arrow/memory"
+	flightgen "github.com/apache/arrow/go/v14/arrow/flight/gen/flight"
 	"github.com/apache/arrow/go/v14/arrow/ipc"
+	"github.com/apache/arrow/go/v14/arrow/memory"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/proto"
@@ -29,7 +29,7 @@ type FlightSQLServer struct {
 	flightgen.UnimplementedFlightServiceServer
 	flightsql.BaseServer
 	queryClient *QueryClient
-	mem        memory.Allocator
+	mem         memory.Allocator
 	// Add result storage
 	results     map[string]arrow.Record
 	resultsLock sync.RWMutex
@@ -42,14 +42,14 @@ func (s *FlightSQLServer) mustEmbedUnimplementedFlightServiceServer() {}
 func NewFlightSQLServer(queryClient *QueryClient) *FlightSQLServer {
 	return &FlightSQLServer{
 		queryClient: queryClient,
-		mem:        memory.DefaultAllocator,
-		results:    make(map[string]arrow.Record),
+		mem:         memory.DefaultAllocator,
+		results:     make(map[string]arrow.Record),
 	}
 }
 
 // PollFlightInfo implements the FlightService interface
 func (s *FlightSQLServer) PollFlightInfo(ctx context.Context, desc *flight.FlightDescriptor) (*flight.PollInfo, error) {
-	log.Printf("PollFlightInfo called with descriptor type: %v, path: %v, cmd: %v", 
+	log.Printf("PollFlightInfo called with descriptor type: %v, path: %v, cmd: %v",
 		desc.Type, desc.Path, string(desc.Cmd))
 	// For now, we don't support polling flight info
 	return nil, nil
@@ -92,7 +92,7 @@ func (s *FlightSQLServer) Handshake(stream flight.FlightService_HandshakeServer)
 
 // GetSchema implements the FlightService interface
 func (s *FlightSQLServer) GetSchema(ctx context.Context, desc *flight.FlightDescriptor) (*flight.SchemaResult, error) {
-	log.Printf("GetSchema called with descriptor type: %v, path: %v, cmd: %v", 
+	log.Printf("GetSchema called with descriptor type: %v, path: %v, cmd: %v",
 		desc.Type, desc.Path, string(desc.Cmd))
 	// For now, we don't support schema requests
 	return nil, fmt.Errorf("schema requests not supported")
@@ -100,9 +100,9 @@ func (s *FlightSQLServer) GetSchema(ctx context.Context, desc *flight.FlightDesc
 
 // GetFlightInfo implements the FlightService interface
 func (s *FlightSQLServer) GetFlightInfo(ctx context.Context, desc *flight.FlightDescriptor) (*flight.FlightInfo, error) {
-	log.Printf("GetFlightInfo called with descriptor type: %v, path: %v, cmd: %v", 
+	log.Printf("GetFlightInfo called with descriptor type: %v, path: %v, cmd: %v",
 		desc.Type, desc.Path, string(desc.Cmd))
-	
+
 	// Handle SQL query command
 	if desc.Type == flight.DescriptorCMD {
 		// Unmarshal the Any message
@@ -130,7 +130,7 @@ func (s *FlightSQLServer) GetFlightInfo(ctx context.Context, desc *flight.Flight
 				return r
 			}, query)
 			log.Printf("Executing SQL query: %v", query)
-			
+
 			// Execute the query using our existing QueryClient
 			results, err := s.queryClient.Query(ctx, query, "mydb") // Using default database for now
 			if err != nil {
@@ -180,19 +180,19 @@ func (s *FlightSQLServer) GetFlightInfo(ctx context.Context, desc *flight.Flight
 			return info, nil
 		}
 	}
-	
+
 	// For now, we don't support any other flight info requests
 	return nil, fmt.Errorf("unsupported flight descriptor type: %v", desc.Type)
 }
 
 // GetFlightInfoStatement implements the FlightSQL server interface for executing SQL statements
 func (s *FlightSQLServer) GetFlightInfoStatement(ctx context.Context, cmd *flightsql.StatementQuery, desc *flight.FlightDescriptor) (*flight.FlightInfo, error) {
-	log.Printf("GetFlightInfoStatement called with descriptor type: %v, path: %v, cmd: %v", 
+	log.Printf("GetFlightInfoStatement called with descriptor type: %v, path: %v, cmd: %v",
 		desc.Type, desc.Path, string(desc.Cmd))
-	
+
 	// Extract query from command
 	query := string(desc.Cmd)
-	
+
 	// Execute the query using our existing QueryClient
 	results, err := s.queryClient.Query(ctx, query, "mydb") // Using default database for now
 	if err != nil {
@@ -237,7 +237,7 @@ func (s *FlightSQLServer) GetFlightInfoStatement(ctx context.Context, cmd *fligh
 // DoGet implements the FlightSQL server interface for retrieving data
 func (s *FlightSQLServer) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetServer) error {
 	log.Printf("DoGet called with ticket: %v", string(ticket.Ticket))
-	
+
 	// Get the results from storage
 	s.resultsLock.RLock()
 	recordBatch, exists := s.results[string(ticket.Ticket)]
@@ -335,7 +335,7 @@ func convertResultsToArrow(results []map[string]interface{}) (*arrow.Schema, arr
 	// Create Arrow arrays for each column
 	allocator := memory.DefaultAllocator
 	arrays := make([]arrow.Array, len(fields))
-	
+
 	for i, field := range fields {
 		var builder array.Builder
 		switch field.Type.ID() {
@@ -540,4 +540,4 @@ func StartFlightSQLServer(port int, queryClient *QueryClient) error {
 
 	log.Printf("FlightSQL server listening on port %d", port)
 	return s.Serve(lis)
-} 
+}

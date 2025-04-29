@@ -1,5 +1,5 @@
 // queryClient.go
-package main
+package querier
 
 import (
 	"context"
@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/marcboeker/go-duckdb/v2"
 	"github.com/gigapi/gigapi-querier/core"
+	_ "github.com/marcboeker/go-duckdb/v2"
 )
 
 var db *sql.DB
@@ -345,7 +345,7 @@ func (q *QueryClient) FindRelevantFiles(ctx context.Context, dbName, measurement
 		// For each date directory, get all hour directories
 		datePath := filepath.Join(q.DataDir, dbName, measurement, dateDir)
 		// log.Printf("Processing date directory: %s", datePath)
-		
+
 		hourDirs, err := q.getHourDirectoriesInRange(datePath, startDate, endDate)
 		if err != nil {
 			log.Printf("Failed to get hour directories for %s: %v", datePath, err)
