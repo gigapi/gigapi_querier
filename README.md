@@ -82,30 +82,13 @@ GigAPI can be used from Grafana using the InfluxDB3 Flight GRPC Datasource
 ![image](https://github.com/user-attachments/assets/a7849ff4-b8f6-433b-8458-1c47394c5e5f)
 
 
-## <img src="https://github.com/user-attachments/assets/a9aa3ebd-9164-476d-aedf-97b817078350" width=24 /> Data Structure
-
-```
-/data
-  /mydb
-    /weather
-      /date=2025-04-10
-        /hour=14
-          *.parquet
-          metadata.json
-```
-
 ## <img src="https://github.com/user-attachments/assets/a9aa3ebd-9164-476d-aedf-97b817078350" width=24 /> Query Processing Logic
 
-1. Parse SQL query to extract measurement name and time range
-2. Find relevant parquet files using metadata
+1. Parse SQL query to extract FROM db.table and time range
+2. Find relevant parquet files using catalog metadata
 3. Use DuckDB to execute optimized queries against selected files
 4. Post-process results to handle BigInt timestamps
 
-## <img src="https://github.com/user-attachments/assets/a9aa3ebd-9164-476d-aedf-97b817078350" width=24 /> Notes for Developers
-
-- File paths in metadata.json may contain absolute paths; the system handles both absolute and relative paths
-- Time fields are converted from nanosecond BigInt to ISO strings
-- Add `?debug=true` to query requests for detailed troubleshooting information
 
 -----
 
