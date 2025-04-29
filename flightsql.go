@@ -308,13 +308,25 @@ func convertResultsToArrow(results []map[string]interface{}) (*arrow.Schema, arr
 		case bool:
 			arrowType = arrow.FixedWidthTypes.Boolean
 		case time.Time:
-			arrowType = arrow.FixedWidthTypes.Timestamp_us
+			arrowType = &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: "UTC"}
 		case nil:
 			// For NULL values, try to infer type from other rows
 			arrowType = inferTypeFromColumn(key, results)
 		default:
-			log.Printf("Unknown type for value %v: %T", v, v)
-			arrowType = arrow.BinaryTypes.String // Default to string for unknown types
+			// Try to infer type from the value's string representation
+			strVal := fmt.Sprintf("%v", v)
+			if _, err := strconv.ParseInt(strVal, 10, 64); err == nil {
+				arrowType = arrow.PrimitiveTypes.Int64
+			} else if _, err := strconv.ParseFloat(strVal, 64); err == nil {
+				arrowType = arrow.PrimitiveTypes.Float64
+			} else if _, err := strconv.ParseBool(strVal); err == nil {
+				arrowType = arrow.FixedWidthTypes.Boolean
+			} else if _, err := time.Parse(time.RFC3339Nano, strVal); err == nil {
+				arrowType = &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: "UTC"}
+			} else {
+				log.Printf("Unknown type for value %v: %T, defaulting to string", v, v)
+				arrowType = arrow.BinaryTypes.String
+			}
 		}
 		fields = append(fields, arrow.Field{Name: key, Type: arrowType, Nullable: true})
 	}
@@ -351,7 +363,13 @@ func convertResultsToArrow(results []map[string]interface{}) (*arrow.Schema, arr
 						builder.(*array.Int64Builder).AppendNull()
 					}
 				default:
-					builder.(*array.Int64Builder).AppendNull()
+					// Try to convert to string and parse
+					strVal := fmt.Sprintf("%v", v)
+					if num, err := strconv.ParseInt(strVal, 10, 64); err == nil {
+						builder.(*array.Int64Builder).Append(num)
+					} else {
+						builder.(*array.Int64Builder).AppendNull()
+					}
 				}
 			}
 		case arrow.FLOAT64:
@@ -378,7 +396,13 @@ func convertResultsToArrow(results []map[string]interface{}) (*arrow.Schema, arr
 						builder.(*array.Float64Builder).AppendNull()
 					}
 				default:
-					builder.(*array.Float64Builder).AppendNull()
+					// Try to convert to string and parse
+					strVal := fmt.Sprintf("%v", v)
+					if num, err := strconv.ParseFloat(strVal, 64); err == nil {
+						builder.(*array.Float64Builder).Append(num)
+					} else {
+						builder.(*array.Float64Builder).AppendNull()
+					}
 				}
 			}
 		case arrow.STRING:
@@ -409,11 +433,17 @@ func convertResultsToArrow(results []map[string]interface{}) (*arrow.Schema, arr
 						builder.(*array.BooleanBuilder).AppendNull()
 					}
 				default:
-					builder.(*array.BooleanBuilder).AppendNull()
+					// Try to convert to string and parse
+					strVal := fmt.Sprintf("%v", v)
+					if b, err := strconv.ParseBool(strVal); err == nil {
+						builder.(*array.BooleanBuilder).Append(b)
+					} else {
+						builder.(*array.BooleanBuilder).AppendNull()
+					}
 				}
 			}
 		case arrow.TIMESTAMP:
-			builder = array.NewTimestampBuilder(allocator, &arrow.TimestampType{Unit: arrow.Microsecond})
+			builder = array.NewTimestampBuilder(allocator, &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: "UTC"})
 			for _, row := range results {
 				val := row[field.Name]
 				if val == nil {
@@ -433,7 +463,14 @@ func convertResultsToArrow(results []map[string]interface{}) (*arrow.Schema, arr
 						builder.(*array.TimestampBuilder).AppendNull()
 					}
 				default:
-					builder.(*array.TimestampBuilder).AppendNull()
+					// Try to convert to string and parse
+					strVal := fmt.Sprintf("%v", v)
+					if t, err := time.Parse(time.RFC3339Nano, strVal); err == nil {
+						utcTime := t.UTC()
+						builder.(*array.TimestampBuilder).Append(arrow.Timestamp(utcTime.UnixMicro()))
+					} else {
+						builder.(*array.TimestampBuilder).AppendNull()
+					}
 				}
 			}
 		default:
@@ -470,7 +507,19 @@ func inferTypeFromColumn(columnName string, results []map[string]interface{}) ar
 			case bool:
 				return arrow.FixedWidthTypes.Boolean
 			case time.Time:
-				return arrow.FixedWidthTypes.Timestamp_us
+				return &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: "UTC"}
+			default:
+				// Try to infer type from string representation
+				strVal := fmt.Sprintf("%v", val)
+				if _, err := strconv.ParseInt(strVal, 10, 64); err == nil {
+					return arrow.PrimitiveTypes.Int64
+				} else if _, err := strconv.ParseFloat(strVal, 64); err == nil {
+					return arrow.PrimitiveTypes.Float64
+				} else if _, err := strconv.ParseBool(strVal); err == nil {
+					return arrow.FixedWidthTypes.Boolean
+				} else if _, err := time.Parse(time.RFC3339Nano, strVal); err == nil {
+					return &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: "UTC"}
+				}
 			}
 		}
 	}
