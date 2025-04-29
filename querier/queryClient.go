@@ -112,7 +112,7 @@ func (q *QueryClient) ParseQuery(sql, dbName string) (*ParsedQuery, error) {
 		}
 	}
 
-	log.Printf("Extracted WHERE clause: %s", whereClause)
+	// log.Printf("Extracted WHERE clause: %s", whereClause)
 
 	// Extract time range
 	timeRange := q.extractTimeRange(whereClause)
@@ -178,7 +178,7 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 		return timeRange
 	}
 
-	log.Printf("Extracting time range from WHERE clause: %s", whereClause)
+	// log.Printf("Extracting time range from WHERE clause: %s", whereClause)
 
 	// Match time patterns including both simple timestamps and epoch_ns with various formats
 	timePatterns := []*regexp.Regexp{
@@ -213,7 +213,7 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 
 	for i, pattern := range timePatterns {
 		matches := pattern.FindStringSubmatch(whereClause)
-		log.Printf("Trying pattern: %s", pattern.String())
+		// log.Printf("Trying pattern: %s", pattern.String())
 		if len(matches) > 0 {
 			log.Printf("Found matches: %v", matches)
 
@@ -221,7 +221,7 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 			if i == 3 || i == 7 || i == 11 || i == 15 { // BETWEEN patterns
 				startTimestamp := matches[1]
 				endTimestamp := matches[2]
-				log.Printf("BETWEEN clause: start=%s, end=%s", startTimestamp, endTimestamp)
+				// log.Printf("BETWEEN clause: start=%s, end=%s", startTimestamp, endTimestamp)
 
 				startTime, err = time.Parse(time.RFC3339Nano, startTimestamp)
 				if err != nil {
@@ -249,7 +249,7 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 			// Handle = patterns
 			if i == 2 || i == 6 || i == 10 || i == 14 { // = patterns
 				timestamp := matches[1]
-				log.Printf("Equal timestamp: %s", timestamp)
+				// log.Printf("Equal timestamp: %s", timestamp)
 
 				parsedTime, err := time.Parse(time.RFC3339Nano, timestamp)
 				if err != nil {
@@ -271,7 +271,7 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 			if len(matches) == 3 {
 				timestamp := matches[2]
 				op := matches[1]
-				log.Printf("Single timestamp comparison: op=%s, timestamp=%s", op, timestamp)
+				// log.Printf("Single timestamp comparison: op=%s, timestamp=%s", op, timestamp)
 
 				parsedTime, err := time.Parse(time.RFC3339Nano, timestamp)
 				if err != nil {
@@ -400,7 +400,7 @@ func (q *QueryClient) FindRelevantFiles(ctx context.Context, dbName, measurement
 	}
 
 	var relevantFiles []string
-	log.Printf("Getting relevant files for %s.%s within time range %v to %v", dbName, measurement,
+	// log.Printf("Getting relevant files for %s.%s within time range %v to %v", dbName, measurement,
 		time.Unix(0, *timeRange.Start), time.Unix(0, *timeRange.End))
 	start := time.Now()
 	defer func() {
@@ -428,7 +428,7 @@ func (q *QueryClient) FindRelevantFiles(ctx context.Context, dbName, measurement
 		log.Printf("Failed to get date directories: %v", err)
 		return nil, err
 	}
-	log.Printf("Found %d date directories", len(dateDirectories))
+	// log.Printf("Found %d date directories", len(dateDirectories))
 
 	for _, dateDir := range dateDirectories {
 		// For each date directory, get all hour directories
@@ -481,7 +481,7 @@ func (q *QueryClient) findAllFiles(ctx context.Context, dbName, measurement stri
 	var allFiles []string
 	basePath := filepath.Join(q.DataDir, dbName, measurement)
 
-	log.Printf("Getting all files for %s.%s", dbName, measurement)
+	// log.Printf("Getting all files for %s.%s", dbName, measurement)
 	start := time.Now()
 	defer func() {
 		log.Printf("Found %d files in: %v", len(allFiles), time.Since(start))
