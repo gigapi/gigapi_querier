@@ -167,8 +167,14 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 		return timeRange
 	}
 
-	// Match time patterns including epoch_ns with various timestamp formats
+	// Match time patterns including both simple timestamps and epoch_ns with various formats
 	timePatterns := []*regexp.Regexp{
+		// Simple timestamp format
+		regexp.MustCompile(`time\s*(>=|>)\s*'([^']+)'`),                    // time >= '2023-01-01T00:00:00Z'
+		regexp.MustCompile(`time\s*(<=|<)\s*'([^']+)'`),                    // time <= '2023-01-01T00:00:00Z'
+		regexp.MustCompile(`time\s*=\s*'([^']+)'`),                         // time = '2023-01-01T00:00:00Z'
+		regexp.MustCompile(`time\s+BETWEEN\s+'([^']+)'\s+AND\s+'([^']+)'`), // time BETWEEN '...' AND '...'
+		// epoch_ns format
 		regexp.MustCompile(`time\s*(>=|>)\s*epoch_ns\((?:cast\('([^']+)' as timestamp\)::TIMESTAMP|'([^']+)'::TIMESTAMP)\)`),                    // time >= epoch_ns('2023-01-01T00:00:00'::TIMESTAMP) or time >= epoch_ns(cast('2023-01-01T00:00:00' as timestamp)::TIMESTAMP)
 		regexp.MustCompile(`time\s*(<=|<)\s*epoch_ns\((?:cast\('([^']+)' as timestamp\)::TIMESTAMP|'([^']+)'::TIMESTAMP)\)`),                    // time <= epoch_ns('2023-01-01T00:00:00'::TIMESTAMP) or time <= epoch_ns(cast('2023-01-01T00:00:00' as timestamp)::TIMESTAMP)
 		regexp.MustCompile(`time\s*=\s*epoch_ns\((?:cast\('([^']+)' as timestamp\)::TIMESTAMP|'([^']+)'::TIMESTAMP)\)`),                         // time = epoch_ns('2023-01-01T00:00:00'::TIMESTAMP) or time = epoch_ns(cast('2023-01-01T00:00:00' as timestamp)::TIMESTAMP)
@@ -214,8 +220,31 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 		return ""
 	}
 
-	// Check for BETWEEN pattern first
+	// Helper function to format time condition
+	formatTimeCondition := func(op string, timeStr string) string {
+		return fmt.Sprintf("time %s epoch_ns('%s'::TIMESTAMP)", op, timeStr)
+	}
+
+	// Check for simple BETWEEN pattern first
 	if match := timePatterns[3].FindStringSubmatch(whereClause); len(match) > 2 {
+		startTime, err := parseTime(match[1])
+		if err == nil {
+			startNanos := startTime.UnixNano()
+			timeRange.Start = &startNanos
+		}
+
+		endTime, err := parseTime(match[2])
+		if err == nil {
+			endNanos := endTime.UnixNano()
+			timeRange.End = &endNanos
+		}
+
+		timeRange.TimeCondition = fmt.Sprintf("time BETWEEN epoch_ns('%s'::TIMESTAMP) AND epoch_ns('%s'::TIMESTAMP)", match[1], match[2])
+		return timeRange
+	}
+
+	// Check for epoch_ns BETWEEN pattern
+	if match := timePatterns[7].FindStringSubmatch(whereClause); len(match) > 2 {
 		startTimeStr := extractTimestamp(match, 1)
 		endTimeStr := extractTimestamp(match, 3)
 		
@@ -239,8 +268,18 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 		return timeRange
 	}
 
-	// Check for >= pattern
+	// Check for simple >= pattern
 	if match := timePatterns[0].FindStringSubmatch(whereClause); len(match) > 2 {
+		startTime, err := parseTime(match[2])
+		if err == nil {
+			startNanos := startTime.UnixNano()
+			timeRange.Start = &startNanos
+		}
+		timeRange.TimeCondition = formatTimeCondition(match[1], match[2])
+	}
+
+	// Check for epoch_ns >= pattern
+	if match := timePatterns[4].FindStringSubmatch(whereClause); len(match) > 2 {
 		timeStr := extractTimestamp(match, 2)
 		if timeStr != "" {
 			startTime, err := parseTime(timeStr)
@@ -249,11 +288,26 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 				timeRange.Start = &startNanos
 			}
 		}
-		timeRange.TimeCondition = fmt.Sprintf("time %s epoch_ns('%s'::TIMESTAMP)", match[1], timeStr)
+		timeRange.TimeCondition = formatTimeCondition(match[1], timeStr)
 	}
 
-	// Check for <= pattern
+	// Check for simple <= pattern
 	if match := timePatterns[1].FindStringSubmatch(whereClause); len(match) > 2 {
+		endTime, err := parseTime(match[2])
+		if err == nil {
+			endNanos := endTime.UnixNano()
+			timeRange.End = &endNanos
+		}
+
+		if timeRange.TimeCondition != "" {
+			timeRange.TimeCondition = fmt.Sprintf("%s AND %s", timeRange.TimeCondition, formatTimeCondition(match[1], match[2]))
+		} else {
+			timeRange.TimeCondition = formatTimeCondition(match[1], match[2])
+		}
+	}
+
+	// Check for epoch_ns <= pattern
+	if match := timePatterns[5].FindStringSubmatch(whereClause); len(match) > 2 {
 		timeStr := extractTimestamp(match, 2)
 		if timeStr != "" {
 			endTime, err := parseTime(timeStr)
@@ -264,14 +318,25 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 		}
 
 		if timeRange.TimeCondition != "" {
-			timeRange.TimeCondition = fmt.Sprintf("%s AND time %s epoch_ns('%s'::TIMESTAMP)", timeRange.TimeCondition, match[1], timeStr)
+			timeRange.TimeCondition = fmt.Sprintf("%s AND %s", timeRange.TimeCondition, formatTimeCondition(match[1], timeStr))
 		} else {
-			timeRange.TimeCondition = fmt.Sprintf("time %s epoch_ns('%s'::TIMESTAMP)", match[1], timeStr)
+			timeRange.TimeCondition = formatTimeCondition(match[1], timeStr)
 		}
 	}
 
-	// Check for = pattern
+	// Check for simple = pattern
 	if match := timePatterns[2].FindStringSubmatch(whereClause); len(match) > 1 {
+		exactTime, err := parseTime(match[1])
+		if err == nil {
+			exactNanos := exactTime.UnixNano()
+			timeRange.Start = &exactNanos
+			timeRange.End = &exactNanos
+		}
+		timeRange.TimeCondition = formatTimeCondition("=", match[1])
+	}
+
+	// Check for epoch_ns = pattern
+	if match := timePatterns[6].FindStringSubmatch(whereClause); len(match) > 1 {
 		timeStr := extractTimestamp(match, 1)
 		if timeStr != "" {
 			exactTime, err := parseTime(timeStr)
@@ -281,7 +346,7 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 				timeRange.End = &exactNanos
 			}
 		}
-		timeRange.TimeCondition = fmt.Sprintf("time = epoch_ns('%s'::TIMESTAMP)", timeStr)
+		timeRange.TimeCondition = formatTimeCondition("=", timeStr)
 	}
 
 	return timeRange
