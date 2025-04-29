@@ -1,8 +1,8 @@
 ![image](https://github.com/user-attachments/assets/fa3788a2-9a5b-47bf-b6ef-f818ba62a404)
 
-# GigAPI Query Engine (go)
+# GigAPI Query Engine
 
-GigAPI Go provides a SQL interface to query time-series using GigAPI Catalog Metadata and DuckDB
+GigAPI Go provides a Flight SQL and HTTP interface to query time-series using GigAPI Catalog Metadata and DuckDB
 
 > [!WARNING]  
 > GigAPI is an open beta developed in public. Bugs and changes should be expected. Use at your own risk.
