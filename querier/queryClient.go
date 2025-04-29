@@ -74,6 +74,8 @@ func (q *QueryClient) ParseQuery(sql, dbName string) (*ParsedQuery, error) {
 	sql = regexp.MustCompile(`\s+`).ReplaceAllString(sql, " ")
 	sql = strings.TrimSpace(sql)
 
+	log.Printf("Parsing query: %s", sql)
+
 	// Extract columns
 	columnsPattern := regexp.MustCompile(`(?i)SELECT\s+(.*?)\s+FROM`)
 	columnsMatch := columnsPattern.FindStringSubmatch(sql)
@@ -110,8 +112,17 @@ func (q *QueryClient) ParseQuery(sql, dbName string) (*ParsedQuery, error) {
 		}
 	}
 
+	log.Printf("Extracted WHERE clause: %s", whereClause)
+
 	// Extract time range
 	timeRange := q.extractTimeRange(whereClause)
+	if timeRange.Start != nil || timeRange.End != nil {
+		log.Printf("Detected time range: %v to %v", 
+			time.Unix(0, *timeRange.Start).Format(time.RFC3339Nano),
+			time.Unix(0, *timeRange.End).Format(time.RFC3339Nano))
+	} else {
+		log.Printf("No time range detected in WHERE clause")
+	}
 
 	// Extract other clauses
 	orderBy := ""
@@ -174,6 +185,11 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 		regexp.MustCompile(`time\s*(<=|<)\s*'([^']+)'`),                    // time <= '2023-01-01T00:00:00Z'
 		regexp.MustCompile(`time\s*=\s*'([^']+)'`),                         // time = '2023-01-01T00:00:00Z'
 		regexp.MustCompile(`time\s+BETWEEN\s+'([^']+)'\s+AND\s+'([^']+)'`), // time BETWEEN '...' AND '...'
+		// Cast timestamp format
+		regexp.MustCompile(`time\s*(>=|>)\s*cast\('([^']+)'\s+as\s+timestamp\)`),                    // time >= cast('2023-01-01T00:00:00Z' as timestamp)
+		regexp.MustCompile(`time\s*(<=|<)\s*cast\('([^']+)'\s+as\s+timestamp\)`),                    // time <= cast('2023-01-01T00:00:00Z' as timestamp)
+		regexp.MustCompile(`time\s*=\s*cast\('([^']+)'\s+as\s+timestamp\)`),                         // time = cast('2023-01-01T00:00:00Z' as timestamp)
+		regexp.MustCompile(`time\s+BETWEEN\s+cast\('([^']+)'\s+as\s+timestamp\)\s+AND\s+cast\('([^']+)'\s+as\s+timestamp\)`), // time BETWEEN cast('...') AND cast('...')
 		// epoch_ns format
 		regexp.MustCompile(`time\s*(>=|>)\s*epoch_ns\((?:cast\('([^']+)' as timestamp\)::TIMESTAMP|'([^']+)'::TIMESTAMP)\)`),                    // time >= epoch_ns('2023-01-01T00:00:00'::TIMESTAMP) or time >= epoch_ns(cast('2023-01-01T00:00:00' as timestamp)::TIMESTAMP)
 		regexp.MustCompile(`time\s*(<=|<)\s*epoch_ns\((?:cast\('([^']+)' as timestamp\)::TIMESTAMP|'([^']+)'::TIMESTAMP)\)`),                    // time <= epoch_ns('2023-01-01T00:00:00'::TIMESTAMP) or time <= epoch_ns(cast('2023-01-01T00:00:00' as timestamp)::TIMESTAMP)
@@ -244,8 +260,26 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 		return timeRange
 	}
 
-	// Check for epoch_ns BETWEEN pattern
+	// Check for cast BETWEEN pattern
 	if match := timePatterns[7].FindStringSubmatch(whereClause); len(match) > 2 {
+		startTime, err := parseTime(match[1])
+		if err == nil {
+			startNanos := startTime.UnixNano()
+			timeRange.Start = &startNanos
+		}
+
+		endTime, err := parseTime(match[2])
+		if err == nil {
+			endNanos := endTime.UnixNano()
+			timeRange.End = &endNanos
+		}
+
+		timeRange.TimeCondition = fmt.Sprintf("time BETWEEN epoch_ns('%s'::TIMESTAMP) AND epoch_ns('%s'::TIMESTAMP)", match[1], match[2])
+		return timeRange
+	}
+
+	// Check for epoch_ns BETWEEN pattern
+	if match := timePatterns[11].FindStringSubmatch(whereClause); len(match) > 2 {
 		startTimeStr := extractTimestamp(match, 1)
 		endTimeStr := extractTimestamp(match, 3)
 		
@@ -279,8 +313,18 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 		timeRange.TimeCondition = formatTimeCondition(match[1], match[2])
 	}
 
-	// Check for epoch_ns >= pattern
+	// Check for cast >= pattern
 	if match := timePatterns[4].FindStringSubmatch(whereClause); len(match) > 2 {
+		startTime, err := parseTime(match[2])
+		if err == nil {
+			startNanos := startTime.UnixNano()
+			timeRange.Start = &startNanos
+		}
+		timeRange.TimeCondition = formatTimeCondition(match[1], match[2])
+	}
+
+	// Check for epoch_ns >= pattern
+	if match := timePatterns[8].FindStringSubmatch(whereClause); len(match) > 2 {
 		timeStr := extractTimestamp(match, 2)
 		if timeStr != "" {
 			startTime, err := parseTime(timeStr)
@@ -307,8 +351,23 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 		}
 	}
 
-	// Check for epoch_ns <= pattern
+	// Check for cast <= pattern
 	if match := timePatterns[5].FindStringSubmatch(whereClause); len(match) > 2 {
+		endTime, err := parseTime(match[2])
+		if err == nil {
+			endNanos := endTime.UnixNano()
+			timeRange.End = &endNanos
+		}
+
+		if timeRange.TimeCondition != "" {
+			timeRange.TimeCondition = fmt.Sprintf("%s AND %s", timeRange.TimeCondition, formatTimeCondition(match[1], match[2]))
+		} else {
+			timeRange.TimeCondition = formatTimeCondition(match[1], match[2])
+		}
+	}
+
+	// Check for epoch_ns <= pattern
+	if match := timePatterns[9].FindStringSubmatch(whereClause); len(match) > 2 {
 		timeStr := extractTimestamp(match, 2)
 		if timeStr != "" {
 			endTime, err := parseTime(timeStr)
@@ -336,8 +395,19 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 		timeRange.TimeCondition = formatTimeCondition("=", match[1])
 	}
 
-	// Check for epoch_ns = pattern
+	// Check for cast = pattern
 	if match := timePatterns[6].FindStringSubmatch(whereClause); len(match) > 1 {
+		exactTime, err := parseTime(match[1])
+		if err == nil {
+			exactNanos := exactTime.UnixNano()
+			timeRange.Start = &exactNanos
+			timeRange.End = &exactNanos
+		}
+		timeRange.TimeCondition = formatTimeCondition("=", match[1])
+	}
+
+	// Check for epoch_ns = pattern
+	if match := timePatterns[10].FindStringSubmatch(whereClause); len(match) > 1 {
 		timeStr := extractTimestamp(match, 1)
 		if timeStr != "" {
 			exactTime, err := parseTime(timeStr)
@@ -734,81 +804,6 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 		return results, nil
 	}
 
-	// Check if this is a simple query without FROM clause
-	if !strings.Contains(upperQuery, "FROM") {
-		// Execute the query directly with DuckDB
-		// log.Printf("Preparing DuckDB query: %q", query)
-		stmt, err := c.DB.Prepare(query)
-		if err != nil {
-			log.Printf("Failed to prepare query: %v\nQuery was: %q", err, query)
-			return nil, fmt.Errorf("failed to prepare query: %v", err)
-		}
-		defer stmt.Close()
-
-		// log.Printf("Executing DuckDB query: %q", query)
-		rows, err := stmt.Query()
-		if err != nil {
-			log.Printf("Failed to execute query: %v\nQuery was: %q", err, query)
-			return nil, fmt.Errorf("query execution failed: %v", err)
-		}
-		defer rows.Close()
-
-		// Get column names
-		columns, err := rows.Columns()
-		if err != nil {
-			log.Printf("Failed to get columns: %v", err)
-			return nil, fmt.Errorf("failed to get columns: %v", err)
-		}
-		// log.Printf("Query returned columns: %v", columns)
-
-		// Prepare result structure
-		var result []map[string]interface{}
-
-		// Process rows
-		for rows.Next() {
-			// Create a slice of interface{} to hold the values
-			values := make([]interface{}, len(columns))
-			valuePtrs := make([]interface{}, len(columns))
-
-			// Set up pointers to each interface{}
-			for i := range values {
-				valuePtrs[i] = &values[i]
-			}
-
-			// Scan the row into the values
-			if err := rows.Scan(valuePtrs...); err != nil {
-				log.Printf("Failed to scan row: %v", err)
-				return nil, fmt.Errorf("error scanning row: %v", err)
-			}
-
-			// Create a map for this row
-			row := make(map[string]interface{})
-
-			// Set each column in the map
-			for i, col := range columns {
-				val := values[i]
-
-				// Handle special cases for counts
-				if strings.Contains(col, "count") && val == nil {
-					row[col] = 0
-				} else {
-					row[col] = val
-				}
-			}
-
-			result = append(result, row)
-		}
-
-		if err := rows.Err(); err != nil {
-			log.Printf("Error iterating rows: %v", err)
-			return nil, fmt.Errorf("error iterating rows: %v", err)
-		}
-
-		// log.Printf("Query returned %d rows", len(result))
-		return result, nil
-	}
-
-	// Handle regular queries through DuckDB
 	// Parse the query
 	parsed, err := c.ParseQuery(query, dbName)
 	if err != nil {
@@ -846,6 +841,8 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 		timestampRegex := regexp.MustCompile(`time\s*(>=|<=|=|>|<)\s*cast\('([^']+)'\s+as\s+timestamp\)`)
 		restOfQuery = timestampRegex.ReplaceAllString(restOfQuery, "time $1 epoch_ns('$2'::TIMESTAMP)")
 
+		log.Printf("Modified query part: %s", restOfQuery)
+
 		// Simply replace the FROM clause with our parquet files
 		duckdbQuery = fmt.Sprintf("%s FROM read_parquet([%s], union_by_name=true)%s",
 			originalParts[0], filesList.String(), restOfQuery)
@@ -876,9 +873,6 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 	if err != nil {
 		return nil, fmt.Errorf("failed to get columns: %v", err)
 	}
-
-	// log.Printf("Retrieved first query result in: %v", time.Since(start))
-	start = time.Now()
 
 	// Prepare result structure
 	var result []map[string]interface{}
