@@ -401,7 +401,7 @@ func (q *QueryClient) FindRelevantFiles(ctx context.Context, dbName, measurement
 
 	var relevantFiles []string
 	// log.Printf("Getting relevant files for %s.%s within time range %v to %v", dbName, measurement,
-		time.Unix(0, *timeRange.Start), time.Unix(0, *timeRange.End))
+		// time.Unix(0, *timeRange.Start), time.Unix(0, *timeRange.End))
 	start := time.Now()
 	defer func() {
 		log.Printf("Found %d files in: %v", len(relevantFiles), time.Since(start))
