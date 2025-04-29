@@ -725,6 +725,10 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 		limitRegex := regexp.MustCompile(`(?i)\s+LIMIT\s+\d+\s*$`)
 		restOfQuery = limitRegex.ReplaceAllString(restOfQuery, "")
 
+		// Remove WHERE clause from restOfQuery since we'll add it separately
+		whereRegex := regexp.MustCompile(`(?i)\s+WHERE\s+.*?(?:\s+(?:GROUP|ORDER|LIMIT|$))`)
+		restOfQuery = whereRegex.ReplaceAllString(restOfQuery, "")
+
 		if len(strings.TrimSpace(restOfQuery)) > 0 {
 			// Fix timestamp format - ensure timestamps have quotes
 			timestampRegex := regexp.MustCompile(`([^'])(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)`)
