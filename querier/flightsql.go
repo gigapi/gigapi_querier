@@ -6,7 +6,7 @@ import (
 	"log"
 	"net"
 	"regexp"
-	"strconv"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/grpc/metadata"
 )
 
 // FlightSQLServer implements the FlightSQL server interface
@@ -131,8 +132,37 @@ func (s *FlightSQLServer) GetFlightInfo(ctx context.Context, desc *flight.Flight
 			}, query)
 			log.Printf("Executing SQL query: %v", query)
 
+			dbName := "default" // Default database name
+			if md, ok := metadata.FromIncomingContext(ctx); ok {
+				if bucket := md.Get("bucket"); len(bucket) > 0 {
+					dbName = bucket[0]
+					log.Printf("Using bucket from metadata: %s", dbName)
+				} else if namespace := md.Get("database"); len(namespace) > 0 {
+					dbName = namespace[0]
+					log.Printf("Using database from metadata: %s", dbName)
+				} else if namespace := md.Get("namespace"); len(namespace) > 0 {
+					dbName = namespace[0]
+					log.Printf("Using namespace from metadata: %s", dbName)
+				}
+			}
+
+			// Parse the query to extract time range
+			parsed, err := s.queryClient.ParseQuery(query, dbName)
+			if err != nil {
+				log.Printf("Failed to parse query: %v", err)
+				return nil, fmt.Errorf("failed to parse query: %w", err)
+			}
+
+			// Find relevant files based on the parsed query
+			files, err := s.queryClient.FindRelevantFiles(ctx, parsed.DbName, parsed.Measurement, parsed.TimeRange)
+			if err != nil {
+				log.Printf("Failed to find relevant files: %v", err)
+				return nil, fmt.Errorf("failed to find relevant files: %w", err)
+			}
+			log.Printf("Found %d relevant files for query", len(files))
+
 			// Execute the query using our existing QueryClient
-			results, err := s.queryClient.Query(ctx, query, "mydb") // Using default database for now
+			results, err := s.queryClient.Query(ctx, query, parsed.DbName) // Use the parsed database name
 			if err != nil {
 				log.Printf("Query execution failed: %v", err)
 				return nil, fmt.Errorf("failed to execute query: %w", err)
@@ -194,7 +224,7 @@ func (s *FlightSQLServer) GetFlightInfoStatement(ctx context.Context, cmd *fligh
 	query := string(desc.Cmd)
 
 	// Execute the query using our existing QueryClient
-	results, err := s.queryClient.Query(ctx, query, "mydb") // Using default database for now
+	results, err := s.queryClient.Query(ctx, query, "default") // Using default database for now
 	if err != nil {
 		log.Printf("Query execution failed: %v", err)
 		return nil, fmt.Errorf("failed to execute query: %w", err)
@@ -294,236 +324,149 @@ func convertResultsToArrow(results []map[string]interface{}) (*arrow.Schema, arr
 		return nil, nil, fmt.Errorf("no results to convert")
 	}
 
-	// Create Arrow schema from the first result
-	fields := make([]arrow.Field, 0)
-	for key, val := range results[0] {
-		var arrowType arrow.DataType
-		switch v := val.(type) {
-		case int, int32, int64:
-			arrowType = arrow.PrimitiveTypes.Int64
-		case float32, float64:
-			arrowType = arrow.PrimitiveTypes.Float64
-		case string:
-			arrowType = arrow.BinaryTypes.String
-		case bool:
-			arrowType = arrow.FixedWidthTypes.Boolean
-		case time.Time:
-			arrowType = &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: "UTC"}
-		case nil:
-			// For NULL values, try to infer type from other rows
-			arrowType = inferTypeFromColumn(key, results)
-		default:
-			// Try to infer type from the value's string representation
-			strVal := fmt.Sprintf("%v", v)
-			if _, err := strconv.ParseInt(strVal, 10, 64); err == nil {
-				arrowType = arrow.PrimitiveTypes.Int64
-			} else if _, err := strconv.ParseFloat(strVal, 64); err == nil {
-				arrowType = arrow.PrimitiveTypes.Float64
-			} else if _, err := strconv.ParseBool(strVal); err == nil {
-				arrowType = arrow.FixedWidthTypes.Boolean
-			} else if _, err := time.Parse(time.RFC3339Nano, strVal); err == nil {
-				arrowType = &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: "UTC"}
-			} else {
-				log.Printf("Unknown type for value %v: %T, defaulting to string", v, v)
-				arrowType = arrow.BinaryTypes.String
-			}
+	// Get column names from the first row, ensuring "time" is first
+	var columnNames []string
+	hasTime := false
+	for columnName := range results[0] {
+		if columnName == "time" {
+			hasTime = true
+			continue
 		}
-		fields = append(fields, arrow.Field{Name: key, Type: arrowType, Nullable: true})
+		columnNames = append(columnNames, columnName)
+	}
+	sort.Strings(columnNames)
+	if hasTime {
+		columnNames = append([]string{"time"}, columnNames...)
+	}
+
+	// Create schema fields
+	fields := make([]arrow.Field, len(columnNames))
+	for i, columnName := range columnNames {
+		dataType := inferTypeFromColumn(columnName, results)
+		fields[i] = arrow.Field{Name: columnName, Type: dataType, Nullable: true}
 	}
 	schema := arrow.NewSchema(fields, nil)
 
-	// Create Arrow arrays for each column
-	allocator := memory.DefaultAllocator
-	arrays := make([]arrow.Array, len(fields))
+	// Create builders for each column
+	builders := make([]array.Builder, len(columnNames))
+	for i, field := range schema.Fields() {
+		builders[i] = array.NewBuilder(memory.DefaultAllocator, field.Type)
+	}
 
-	for i, field := range fields {
-		var builder array.Builder
-		switch field.Type.ID() {
-		case arrow.INT64:
-			builder = array.NewInt64Builder(allocator)
-			for _, row := range results {
-				val := row[field.Name]
-				if val == nil {
-					builder.AppendNull()
-					continue
-				}
-				switch v := val.(type) {
-				case int:
-					builder.(*array.Int64Builder).Append(int64(v))
-				case int32:
-					builder.(*array.Int64Builder).Append(int64(v))
+	// Populate builders with data
+	for _, row := range results {
+		for i, columnName := range columnNames {
+			value := row[columnName]
+			if value == nil {
+				builders[i].AppendNull()
+				continue
+			}
+
+			switch builder := builders[i].(type) {
+			case *array.TimestampBuilder:
+				switch value.(type) {
 				case int64:
-					builder.(*array.Int64Builder).Append(v)
-				case float64:
-					builder.(*array.Int64Builder).Append(int64(v))
+					ts := value.(int64)
+					builder.Append(arrow.Timestamp(ts))
 				case string:
-					if num, err := strconv.ParseInt(v, 10, 64); err == nil {
-						builder.(*array.Int64Builder).Append(num)
+					str := value.(string)
+					if ts, err := parseTimestamp(str); err == nil {
+						builder.Append(arrow.Timestamp(ts))
 					} else {
-						builder.(*array.Int64Builder).AppendNull()
+						builder.AppendNull()
 					}
 				default:
-					// Try to convert to string and parse
-					strVal := fmt.Sprintf("%v", v)
-					if num, err := strconv.ParseInt(strVal, 10, 64); err == nil {
-						builder.(*array.Int64Builder).Append(num)
-					} else {
-						builder.(*array.Int64Builder).AppendNull()
-					}
-				}
-			}
-		case arrow.FLOAT64:
-			builder = array.NewFloat64Builder(allocator)
-			for _, row := range results {
-				val := row[field.Name]
-				if val == nil {
 					builder.AppendNull()
-					continue
 				}
-				switch v := val.(type) {
-				case float64:
-					builder.(*array.Float64Builder).Append(v)
-				case float32:
-					builder.(*array.Float64Builder).Append(float64(v))
-				case int:
-					builder.(*array.Float64Builder).Append(float64(v))
-				case int64:
-					builder.(*array.Float64Builder).Append(float64(v))
-				case string:
-					if num, err := strconv.ParseFloat(v, 64); err == nil {
-						builder.(*array.Float64Builder).Append(num)
-					} else {
-						builder.(*array.Float64Builder).AppendNull()
-					}
-				default:
-					// Try to convert to string and parse
-					strVal := fmt.Sprintf("%v", v)
-					if num, err := strconv.ParseFloat(strVal, 64); err == nil {
-						builder.(*array.Float64Builder).Append(num)
-					} else {
-						builder.(*array.Float64Builder).AppendNull()
-					}
-				}
-			}
-		case arrow.STRING:
-			builder = array.NewStringBuilder(allocator)
-			for _, row := range results {
-				val := row[field.Name]
-				if val == nil {
+			case *array.Int64Builder:
+				if v, ok := value.(int64); ok {
+					builder.Append(v)
+				} else {
 					builder.AppendNull()
-					continue
 				}
-				builder.(*array.StringBuilder).Append(fmt.Sprintf("%v", val))
-			}
-		case arrow.BOOL:
-			builder = array.NewBooleanBuilder(allocator)
-			for _, row := range results {
-				val := row[field.Name]
-				if val == nil {
+			case *array.Float64Builder:
+				if v, ok := value.(float64); ok {
+					builder.Append(v)
+				} else {
 					builder.AppendNull()
-					continue
 				}
-				switch v := val.(type) {
-				case bool:
-					builder.(*array.BooleanBuilder).Append(v)
-				case string:
-					if b, err := strconv.ParseBool(v); err == nil {
-						builder.(*array.BooleanBuilder).Append(b)
-					} else {
-						builder.(*array.BooleanBuilder).AppendNull()
-					}
-				default:
-					// Try to convert to string and parse
-					strVal := fmt.Sprintf("%v", v)
-					if b, err := strconv.ParseBool(strVal); err == nil {
-						builder.(*array.BooleanBuilder).Append(b)
-					} else {
-						builder.(*array.BooleanBuilder).AppendNull()
-					}
-				}
-			}
-		case arrow.TIMESTAMP:
-			builder = array.NewTimestampBuilder(allocator, &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: "UTC"})
-			for _, row := range results {
-				val := row[field.Name]
-				if val == nil {
+			case *array.BooleanBuilder:
+				if v, ok := value.(bool); ok {
+					builder.Append(v)
+				} else {
 					builder.AppendNull()
-					continue
 				}
-				switch v := val.(type) {
-				case time.Time:
-					// Convert to UTC if not already
-					utcTime := v.UTC()
-					builder.(*array.TimestampBuilder).Append(arrow.Timestamp(utcTime.UnixMicro()))
-				case string:
-					if t, err := time.Parse(time.RFC3339Nano, v); err == nil {
-						utcTime := t.UTC()
-						builder.(*array.TimestampBuilder).Append(arrow.Timestamp(utcTime.UnixMicro()))
-					} else {
-						builder.(*array.TimestampBuilder).AppendNull()
-					}
-				default:
-					// Try to convert to string and parse
-					strVal := fmt.Sprintf("%v", v)
-					if t, err := time.Parse(time.RFC3339Nano, strVal); err == nil {
-						utcTime := t.UTC()
-						builder.(*array.TimestampBuilder).Append(arrow.Timestamp(utcTime.UnixMicro()))
-					} else {
-						builder.(*array.TimestampBuilder).AppendNull()
-					}
+			case *array.StringBuilder:
+				if v, ok := value.(string); ok {
+					builder.Append(v)
+				} else {
+					builder.Append(fmt.Sprintf("%v", value))
 				}
-			}
-		default:
-			builder = array.NewStringBuilder(allocator)
-			for _, row := range results {
-				val := row[field.Name]
-				if val == nil {
-					builder.AppendNull()
-					continue
-				}
-				builder.(*array.StringBuilder).Append(fmt.Sprintf("%v", val))
+			default:
+				return nil, nil, fmt.Errorf("unsupported builder type for column %s", columnName)
 			}
 		}
+	}
+
+	// Create arrays from builders
+	arrays := make([]arrow.Array, len(builders))
+	for i, builder := range builders {
 		arrays[i] = builder.NewArray()
+		defer arrays[i].Release()
 		builder.Release()
 	}
 
-	// Create record batch
-	recordBatch := array.NewRecord(schema, arrays, int64(len(results)))
-	return schema, recordBatch, nil
+	// Create record
+	record := array.NewRecord(schema, arrays, int64(len(results)))
+	return schema, record, nil
+}
+
+func parseTimestamp(s string) (int64, error) {
+	formats := []string{
+		time.RFC3339,
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02T15:04:05.999999999",
+	}
+
+	for _, format := range formats {
+		if t, err := time.Parse(format, s); err == nil {
+			return t.UnixNano(), nil
+		}
+	}
+	return 0, fmt.Errorf("could not parse timestamp: %s", s)
 }
 
 // inferTypeFromColumn attempts to infer the Arrow type for a column by looking at non-null values
 func inferTypeFromColumn(columnName string, results []map[string]interface{}) arrow.DataType {
+	// Time-related columns should always be timestamps
+	if columnName == "time" || columnName == "time_str" || columnName == "time_int" {
+		return &arrow.TimestampType{Unit: arrow.Nanosecond, TimeZone: "UTC"}
+	}
+
+	// For other columns, infer type from the first non-nil value
 	for _, row := range results {
-		if val := row[columnName]; val != nil {
-			switch val.(type) {
-			case int, int32, int64:
+		if value, exists := row[columnName]; exists && value != nil {
+			switch value.(type) {
+			case int64:
 				return arrow.PrimitiveTypes.Int64
-			case float32, float64:
+			case float64:
 				return arrow.PrimitiveTypes.Float64
-			case string:
-				return arrow.BinaryTypes.String
 			case bool:
 				return arrow.FixedWidthTypes.Boolean
-			case time.Time:
-				return &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: "UTC"}
+			case string:
+				return arrow.BinaryTypes.String
 			default:
-				// Try to infer type from string representation
-				strVal := fmt.Sprintf("%v", val)
-				if _, err := strconv.ParseInt(strVal, 10, 64); err == nil {
-					return arrow.PrimitiveTypes.Int64
-				} else if _, err := strconv.ParseFloat(strVal, 64); err == nil {
-					return arrow.PrimitiveTypes.Float64
-				} else if _, err := strconv.ParseBool(strVal); err == nil {
-					return arrow.FixedWidthTypes.Boolean
-				} else if _, err := time.Parse(time.RFC3339Nano, strVal); err == nil {
-					return &arrow.TimestampType{Unit: arrow.Microsecond, TimeZone: "UTC"}
-				}
+				// If we encounter an unknown type, convert it to string
+				return arrow.BinaryTypes.String
 			}
 		}
 	}
-	return arrow.BinaryTypes.String // Default to string if no non-null values found
+
+	// If all values are nil, default to string type
+	return arrow.BinaryTypes.String
 }
 
 // StartFlightSQLServer starts the FlightSQL server
