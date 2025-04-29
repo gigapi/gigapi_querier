@@ -182,16 +182,36 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 		log.Printf("Pattern %d: %s", i, pattern.String())
 	}
 
+	// Helper function to parse time with UTC timezone
+	parseTime := func(timeStr string) (time.Time, error) {
+		// Try parsing with UTC timezone first
+		t, err := time.Parse("2006-01-02T15:04:05Z", timeStr+"Z")
+		if err == nil {
+			return t, nil
+		}
+		// Try parsing with nanosecond precision
+		t, err = time.Parse("2006-01-02T15:04:05.999999999Z", timeStr+"Z")
+		if err == nil {
+			return t, nil
+		}
+		// Try parsing with timezone offset
+		t, err = time.Parse("2006-01-02T15:04:05-07:00", timeStr+"Z")
+		if err == nil {
+			return t, nil
+		}
+		return time.Time{}, fmt.Errorf("failed to parse time: %v", err)
+	}
+
 	// Check for BETWEEN pattern first
 	if match := timePatterns[3].FindStringSubmatch(whereClause); len(match) > 2 {
 		log.Printf("Found BETWEEN pattern match: %v", match)
-		startTime, err := time.Parse(time.RFC3339Nano, match[1])
+		startTime, err := parseTime(match[1])
 		if err == nil {
 			startNanos := startTime.UnixNano()
 			timeRange.Start = &startNanos
 		}
 
-		endTime, err := time.Parse(time.RFC3339Nano, match[2])
+		endTime, err := parseTime(match[2])
 		if err == nil {
 			endNanos := endTime.UnixNano()
 			timeRange.End = &endNanos
@@ -204,7 +224,7 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 	// Check for >= pattern
 	if match := timePatterns[0].FindStringSubmatch(whereClause); len(match) > 2 {
 		log.Printf("Found >= pattern match: %v", match)
-		startTime, err := time.Parse(time.RFC3339Nano, match[2])
+		startTime, err := parseTime(match[2])
 		if err == nil {
 			startNanos := startTime.UnixNano()
 			timeRange.Start = &startNanos
@@ -218,7 +238,7 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 	// Check for <= pattern
 	if match := timePatterns[1].FindStringSubmatch(whereClause); len(match) > 2 {
 		log.Printf("Found <= pattern match: %v", match)
-		endTime, err := time.Parse(time.RFC3339Nano, match[2])
+		endTime, err := parseTime(match[2])
 		if err == nil {
 			endNanos := endTime.UnixNano()
 			timeRange.End = &endNanos
@@ -237,7 +257,7 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 	// Check for = pattern
 	if match := timePatterns[2].FindStringSubmatch(whereClause); len(match) > 1 {
 		log.Printf("Found = pattern match: %v", match)
-		exactTime, err := time.Parse(time.RFC3339Nano, match[1])
+		exactTime, err := parseTime(match[1])
 		if err == nil {
 			exactNanos := exactTime.UnixNano()
 			timeRange.Start = &exactNanos
