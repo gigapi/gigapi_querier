@@ -422,10 +422,13 @@ func convertResultsToArrow(results []map[string]interface{}) (*arrow.Schema, arr
 				}
 				switch v := val.(type) {
 				case time.Time:
-					builder.(*array.TimestampBuilder).Append(arrow.Timestamp(v.UnixMicro()))
+					// Convert to UTC if not already
+					utcTime := v.UTC()
+					builder.(*array.TimestampBuilder).Append(arrow.Timestamp(utcTime.UnixMicro()))
 				case string:
 					if t, err := time.Parse(time.RFC3339Nano, v); err == nil {
-						builder.(*array.TimestampBuilder).Append(arrow.Timestamp(t.UnixMicro()))
+						utcTime := t.UTC()
+						builder.(*array.TimestampBuilder).Append(arrow.Timestamp(utcTime.UnixMicro()))
 					} else {
 						builder.(*array.TimestampBuilder).AppendNull()
 					}
