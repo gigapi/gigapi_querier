@@ -47,21 +47,30 @@ PORT=8080 DATA_DIR=./data ./gigapi
 
 ### Query Data
 
-#### API
+#### Query Processing Logic
+
+1. Parse SQL query to extract FROM db.table and time range
+2. Find relevant parquet files using catalog metadata
+3. Use DuckDB to execute optimized queries against selected files
+4. Post-process results to handle BigInt timestamps
+
+
+
+#### <img src="https://github.com/user-attachments/assets/a9aa3ebd-9164-476d-aedf-97b817078350" width=24 /> API
 ```bash
 $ curl -X POST "http://localhost:8080/query?db=mydb" \
   -H "Content-Type: application/json"  \
   -d '{"query": "SELECT time, location, temperature FROM weather WHERE time >= '2025-04-01T00:00:00'"}'
 ```
 
-#### CLI
+#### <img src="https://github.com/user-attachments/assets/a9aa3ebd-9164-476d-aedf-97b817078350" width=24 /> CLI
 The GigAPI Querier can also be used in CLI mode to execute an individual query
 
 ```bash
 $ ./gigapi --query "SELECT count(*), avg(temperature) FROM weather" --db mydb
 ```
 
-#### FlightSQL
+#### <img src="https://github.com/user-attachments/assets/a9aa3ebd-9164-476d-aedf-97b817078350" width=24 /> FlightSQL
 GigAPI data can be accessed using FlightSQL GRPC clients in any language
 ```python
 from flightsql import connect, FlightSQLClient
@@ -72,25 +81,17 @@ cursor.execute('SELECT 1, version()')
 print("rows:", [r for r in cursor])
 ```
 
-#### UI
+#### <img src="https://github.com/user-attachments/assets/a9aa3ebd-9164-476d-aedf-97b817078350" width=24 /> UI
 A quick and dirty query user-interface is also provided for testing
 ![image](https://github.com/user-attachments/assets/a9f09b3f-10fc-42e3-9092-770252e0d8d3)
 
-#### Grafana
+#### <img src="https://github.com/user-attachments/assets/a9aa3ebd-9164-476d-aedf-97b817078350" width=24 /> Grafana
 GigAPI can be used from Grafana using the InfluxDB3 Flight GRPC Datasource
 
 ![image](https://github.com/user-attachments/assets/a7849ff4-b8f6-433b-8458-1c47394c5e5f)
 
 
-## <img src="https://github.com/user-attachments/assets/a9aa3ebd-9164-476d-aedf-97b817078350" width=24 /> Query Processing Logic
-
-1. Parse SQL query to extract FROM db.table and time range
-2. Find relevant parquet files using catalog metadata
-3. Use DuckDB to execute optimized queries against selected files
-4. Post-process results to handle BigInt timestamps
-
-
------
+<br>
 
 ## License
 
