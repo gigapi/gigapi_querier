@@ -222,8 +222,8 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 
 	// Helper function to format time condition
 	formatTimeCondition := func(op string, timeStr string) string {
-		// First cast the timestamp string to TIMESTAMP, then to BIGINT for comparison
-		return fmt.Sprintf("time %s cast(cast('%s' as timestamp) as bigint)", op, timeStr)
+		// Use epoch_ns for timestamp conversion
+		return fmt.Sprintf("time %s epoch_ns('%s'::TIMESTAMP)", op, timeStr)
 	}
 
 	// Check for simple BETWEEN pattern first
@@ -240,7 +240,7 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 			timeRange.End = &endNanos
 		}
 
-		timeRange.TimeCondition = fmt.Sprintf("time BETWEEN cast(cast('%s' as timestamp) as bigint) AND cast(cast('%s' as timestamp) as bigint)", match[1], match[2])
+		timeRange.TimeCondition = fmt.Sprintf("time BETWEEN epoch_ns('%s'::TIMESTAMP) AND epoch_ns('%s'::TIMESTAMP)", match[1], match[2])
 		return timeRange
 	}
 
@@ -265,7 +265,7 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 			}
 		}
 
-		timeRange.TimeCondition = fmt.Sprintf("time BETWEEN cast(cast('%s' as timestamp) as bigint) AND cast(cast('%s' as timestamp) as bigint)", startTimeStr, endTimeStr)
+		timeRange.TimeCondition = fmt.Sprintf("time BETWEEN epoch_ns('%s'::TIMESTAMP) AND epoch_ns('%s'::TIMESTAMP)", startTimeStr, endTimeStr)
 		return timeRange
 	}
 
