@@ -842,6 +842,10 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 		tableRegex := regexp.MustCompile(tablePattern)
 		restOfQuery := tableRegex.ReplaceAllString(originalParts[1], "")
 
+		// Replace any simple timestamp comparisons with epoch_ns
+		timestampRegex := regexp.MustCompile(`time\s*(>=|<=|=|>|<)\s*cast\('([^']+)'\s+as\s+timestamp\)`)
+		restOfQuery = timestampRegex.ReplaceAllString(restOfQuery, "time $1 epoch_ns('$2'::TIMESTAMP)")
+
 		// Simply replace the FROM clause with our parquet files
 		duckdbQuery = fmt.Sprintf("%s FROM read_parquet([%s], union_by_name=true)%s",
 			originalParts[0], filesList.String(), restOfQuery)
