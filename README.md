@@ -47,20 +47,28 @@ PORT=8080 DATA_DIR=./data ./gigapi
 
 ### Query Data
 
+#### API
 ```bash
 $ curl -X POST "http://localhost:8080/query?db=mydb" \
   -H "Content-Type: application/json"  \
   -d '{"query": "SELECT time, location, temperature FROM weather WHERE time >= '2025-04-01T00:00:00'"}'
 ```
 
+#### CLI
 The GigAPI Querier can also be used in CLI mode to execute an individual query
 
 ```bash
 $ ./gigapi --query "SELECT count(*), avg(temperature) FROM weather" --db mydb
 ```
-
+#### UI
 A quick and dirty query user-interface is also provided for testing
 ![image](https://github.com/user-attachments/assets/a9f09b3f-10fc-42e3-9092-770252e0d8d3)
+
+#### Grafana
+GigAPI can be used from Grafana using the InfluxDB3 Datasource
+
+![image](https://github.com/user-attachments/assets/a7849ff4-b8f6-433b-8458-1c47394c5e5f)
+
 
 ## <img src="https://github.com/user-attachments/assets/a9aa3ebd-9164-476d-aedf-97b817078350" width=24 /> Data Structure
 
