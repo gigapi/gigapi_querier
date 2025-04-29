@@ -208,6 +208,9 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 		if err == nil {
 			startNanos := startTime.UnixNano()
 			timeRange.Start = &startNanos
+			log.Printf("Parsed start time: %v", startTime)
+		} else {
+			log.Printf("Failed to parse start time: %v", err)
 		}
 		timeRange.TimeCondition = fmt.Sprintf("time %s epoch_ns('%s'::TIMESTAMP)", match[1], match[2])
 	}
@@ -219,6 +222,9 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 		if err == nil {
 			endNanos := endTime.UnixNano()
 			timeRange.End = &endNanos
+			log.Printf("Parsed end time: %v", endTime)
+		} else {
+			log.Printf("Failed to parse end time: %v", err)
 		}
 
 		if timeRange.TimeCondition != "" {
@@ -236,6 +242,9 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 			exactNanos := exactTime.UnixNano()
 			timeRange.Start = &exactNanos
 			timeRange.End = &exactNanos
+			log.Printf("Parsed exact time: %v", exactTime)
+		} else {
+			log.Printf("Failed to parse exact time: %v", err)
 		}
 		timeRange.TimeCondition = fmt.Sprintf("time = epoch_ns('%s'::TIMESTAMP)", match[1])
 	}
