@@ -177,8 +177,14 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 		regexp.MustCompile(`time\s+BETWEEN\s+epoch_ns\('([^']+)'::TIMESTAMP\)\s+AND\s+epoch_ns\('([^']+)'::TIMESTAMP\)`), // time BETWEEN epoch_ns('...') AND epoch_ns('...')
 	}
 
+	// Log the patterns for debugging
+	for i, pattern := range timePatterns {
+		log.Printf("Pattern %d: %s", i, pattern.String())
+	}
+
 	// Check for BETWEEN pattern first
 	if match := timePatterns[3].FindStringSubmatch(whereClause); len(match) > 2 {
+		log.Printf("Found BETWEEN pattern match: %v", match)
 		startTime, err := time.Parse(time.RFC3339Nano, match[1])
 		if err == nil {
 			startNanos := startTime.UnixNano()
@@ -197,6 +203,7 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 
 	// Check for >= pattern
 	if match := timePatterns[0].FindStringSubmatch(whereClause); len(match) > 2 {
+		log.Printf("Found >= pattern match: %v", match)
 		startTime, err := time.Parse(time.RFC3339Nano, match[2])
 		if err == nil {
 			startNanos := startTime.UnixNano()
@@ -207,6 +214,7 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 
 	// Check for <= pattern
 	if match := timePatterns[1].FindStringSubmatch(whereClause); len(match) > 2 {
+		log.Printf("Found <= pattern match: %v", match)
 		endTime, err := time.Parse(time.RFC3339Nano, match[2])
 		if err == nil {
 			endNanos := endTime.UnixNano()
@@ -222,6 +230,7 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 
 	// Check for = pattern
 	if match := timePatterns[2].FindStringSubmatch(whereClause); len(match) > 1 {
+		log.Printf("Found = pattern match: %v", match)
 		exactTime, err := time.Parse(time.RFC3339Nano, match[1])
 		if err == nil {
 			exactNanos := exactTime.UnixNano()
@@ -236,6 +245,8 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 		log.Printf("Extracted time range: %v to %v", 
 			time.Unix(0, *timeRange.Start).Format(time.RFC3339Nano),
 			time.Unix(0, *timeRange.End).Format(time.RFC3339Nano))
+	} else {
+		log.Printf("No time range extracted from WHERE clause: %s", whereClause)
 	}
 
 	return timeRange
