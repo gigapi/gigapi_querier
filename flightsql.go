@@ -100,11 +100,15 @@ func (s *FlightSQLServer) GetSchema(ctx context.Context, desc *flight.FlightDesc
 
 // GetFlightInfo implements the FlightService interface
 func (s *FlightSQLServer) GetFlightInfo(ctx context.Context, desc *flight.FlightDescriptor) (*flight.FlightInfo, error) {
+	log.Printf("GetFlightInfo called with descriptor type: %v, path: %v, cmd: %v", 
+		desc.Type, desc.Path, string(desc.Cmd))
+	
 	// Handle SQL query command
 	if desc.Type == flight.DescriptorCMD {
 		// Unmarshal the Any message
 		any := &anypb.Any{}
 		if err := proto.Unmarshal(desc.Cmd, any); err != nil {
+			log.Printf("Failed to unmarshal Any message: %v", err)
 			return nil, fmt.Errorf("failed to unmarshal command: %w", err)
 		}
 
@@ -125,16 +129,19 @@ func (s *FlightSQLServer) GetFlightInfo(ctx context.Context, desc *flight.Flight
 				}
 				return r
 			}, query)
+			log.Printf("Executing SQL query: %v", query)
 			
 			// Execute the query using our existing QueryClient
 			results, err := s.queryClient.Query(ctx, query, "mydb") // Using default database for now
 			if err != nil {
+				log.Printf("Query execution failed: %v", err)
 				return nil, fmt.Errorf("failed to execute query: %w", err)
 			}
 
 			// Convert results to Arrow format
 			_, recordBatch, err := convertResultsToArrow(results)
 			if err != nil {
+				log.Printf("Failed to convert results to Arrow format: %v", err)
 				return nil, fmt.Errorf("failed to convert results to Arrow format: %w", err)
 			}
 
@@ -169,6 +176,7 @@ func (s *FlightSQLServer) GetFlightInfo(ctx context.Context, desc *flight.Flight
 				Schema:       []byte{}, // Empty schema, will be sent in DoGet
 			}
 
+			log.Printf("Returning flight info with %d records", recordBatch.NumRows())
 			return info, nil
 		}
 	}
@@ -228,6 +236,8 @@ func (s *FlightSQLServer) GetFlightInfoStatement(ctx context.Context, cmd *fligh
 
 // DoGet implements the FlightSQL server interface for retrieving data
 func (s *FlightSQLServer) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetServer) error {
+	log.Printf("DoGet called with ticket: %v", string(ticket.Ticket))
+	
 	// Get the results from storage
 	s.resultsLock.RLock()
 	recordBatch, exists := s.results[string(ticket.Ticket)]
@@ -244,6 +254,7 @@ func (s *FlightSQLServer) DoGet(ticket *flight.Ticket, stream flight.FlightServi
 	writer := flight.NewRecordWriter(stream, ipc.WithSchema(schema))
 	err := writer.Write(recordBatch)
 	if err != nil {
+		log.Printf("Failed to write record batch: %v", err)
 		return fmt.Errorf("failed to write record batch: %w", err)
 	}
 
@@ -252,6 +263,7 @@ func (s *FlightSQLServer) DoGet(ticket *flight.Ticket, stream flight.FlightServi
 	delete(s.results, string(ticket.Ticket))
 	s.resultsLock.Unlock()
 
+	log.Printf("Successfully wrote record batch with %d rows", recordBatch.NumRows())
 	return writer.Close()
 }
 
@@ -286,7 +298,7 @@ func convertResultsToArrow(results []map[string]interface{}) (*arrow.Schema, arr
 	fields := make([]arrow.Field, 0)
 	for key, val := range results[0] {
 		var arrowType arrow.DataType
-		switch val.(type) {
+		switch v := val.(type) {
 		case int, int32, int64:
 			arrowType = arrow.PrimitiveTypes.Int64
 		case float32, float64:
@@ -301,6 +313,7 @@ func convertResultsToArrow(results []map[string]interface{}) (*arrow.Schema, arr
 			// For NULL values, try to infer type from other rows
 			arrowType = inferTypeFromColumn(key, results)
 		default:
+			log.Printf("Unknown type for value %v: %T", v, v)
 			arrowType = arrow.BinaryTypes.String // Default to string for unknown types
 		}
 		fields = append(fields, arrow.Field{Name: key, Type: arrowType, Nullable: true})
