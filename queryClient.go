@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -13,9 +14,13 @@ import (
 	"time"
 
 	_ "github.com/marcboeker/go-duckdb/v2"
+	"github.com/gigapi/gigapi-querier/core"
 )
 
 var db *sql.DB
+
+// Ensure QueryClient implements core.QueryClient interface
+var _ core.QueryClient = (*QueryClient)(nil)
 
 // QueryClient handles parsing SQL and querying parquet files
 type QueryClient struct {
@@ -301,15 +306,16 @@ func (q *QueryClient) FindRelevantFiles(ctx context.Context, dbName, measurement
 	timeRange TimeRange) ([]string, error) {
 	// If no time range specified, get all files
 	if timeRange.Start == nil && timeRange.End == nil {
+		log.Printf("No time range specified, getting all files for %s.%s", dbName, measurement)
 		return q.findAllFiles(ctx, dbName, measurement)
 	}
 
 	var relevantFiles []string
-	Debugf(ctx, "Getting relevant files for %s.%s within time range %v to %v", dbName, measurement,
+	log.Printf("Getting relevant files for %s.%s within time range %v to %v", dbName, measurement,
 		time.Unix(0, *timeRange.Start), time.Unix(0, *timeRange.End))
 	start := time.Now()
 	defer func() {
-		Debugf(ctx, "Found %d files in: %v", len(relevantFiles), time.Since(start))
+		log.Printf("Found %d files in: %v", len(relevantFiles), time.Since(start))
 	}()
 
 	// Convert nanosecond timestamps to time.Time for directory parsing
@@ -327,38 +333,55 @@ func (q *QueryClient) FindRelevantFiles(ctx context.Context, dbName, measurement
 	}
 
 	// Get all date directories that might contain relevant data
+	// log.Printf("Looking for date directories between %v and %v", startDate, endDate)
 	dateDirectories, err := q.getDateDirectoriesInRange(dbName, measurement, startDate, endDate)
 	if err != nil {
+		log.Printf("Failed to get date directories: %v", err)
 		return nil, err
 	}
+	log.Printf("Found %d date directories", len(dateDirectories))
 
 	for _, dateDir := range dateDirectories {
 		// For each date directory, get all hour directories
 		datePath := filepath.Join(q.DataDir, dbName, measurement, dateDir)
+		// log.Printf("Processing date directory: %s", datePath)
+		
 		hourDirs, err := q.getHourDirectoriesInRange(datePath, startDate, endDate)
 		if err != nil {
+			log.Printf("Failed to get hour directories for %s: %v", datePath, err)
 			continue // Skip this directory on error
 		}
+		// log.Printf("Found %d hour directories in %s", len(hourDirs), dateDir)
 
 		for _, hourDir := range hourDirs {
 			hourPath := filepath.Join(datePath, hourDir)
+			// log.Printf("Processing hour directory: %s", hourPath)
 
 			// Read metadata.json
 			metadataPath := filepath.Join(hourPath, "metadata.json")
 			if _, err := os.Stat(metadataPath); err == nil {
+				// log.Printf("Found metadata.json in %s", hourPath)
 				_relevantFiles, err := q.enumFolderWithMetadata(metadataPath, timeRange)
 				if err == nil {
+					// log.Printf("Found %d files in metadata.json", len(_relevantFiles))
 					relevantFiles = append(relevantFiles, _relevantFiles...)
 					continue
 				}
+				log.Printf("Failed to read metadata.json: %v", err)
 			}
 
 			_relevantFiles, err := q.enumFolderNoMetadata(hourPath)
 			if err == nil {
+				// log.Printf("Found %d files without metadata", len(_relevantFiles))
 				relevantFiles = append(relevantFiles, _relevantFiles...)
 				continue
 			}
+			log.Printf("Failed to enumerate folder: %v", err)
 		}
+	}
+
+	if len(relevantFiles) == 0 {
+		log.Printf("No files found in any directory for %s.%s", dbName, measurement)
 	}
 
 	return relevantFiles, nil
@@ -369,10 +392,10 @@ func (q *QueryClient) findAllFiles(ctx context.Context, dbName, measurement stri
 	var allFiles []string
 	basePath := filepath.Join(q.DataDir, dbName, measurement)
 
-	Debugf(ctx, "Getting all files for %s.%s", dbName, measurement)
+	log.Printf("Getting all files for %s.%s", dbName, measurement)
 	start := time.Now()
 	defer func() {
-		Debugf(ctx, "Found %d files in: %v", len(allFiles), time.Since(start))
+		log.Printf("Found %d files in: %v", len(allFiles), time.Since(start))
 	}()
 
 	if _, err := os.Stat(basePath); os.IsNotExist(err) {
@@ -541,8 +564,16 @@ func (q *QueryClient) getHourDirectoriesInRange(datePath string, startDate, endD
 
 // Query executes a query against the database
 func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[string]interface{}, error) {
-	// Check for special commands
+	// Ensure we have a context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	// Clean up the query string
 	query = strings.TrimSpace(query)
+	query = strings.ReplaceAll(query, "\n", " ")
+	query = strings.ReplaceAll(query, "\r", " ")
+	query = regexp.MustCompile(`\s+`).ReplaceAllString(query, " ")
 	upperQuery := strings.ToUpper(query)
 
 	// Handle special commands
@@ -582,6 +613,80 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 		return results, nil
 	}
 
+	// Check if this is a simple query without FROM clause
+	if !strings.Contains(upperQuery, "FROM") {
+		// Execute the query directly with DuckDB
+		// log.Printf("Preparing DuckDB query: %q", query)
+		stmt, err := c.DB.Prepare(query)
+		if err != nil {
+			log.Printf("Failed to prepare query: %v\nQuery was: %q", err, query)
+			return nil, fmt.Errorf("failed to prepare query: %v", err)
+		}
+		defer stmt.Close()
+
+		// log.Printf("Executing DuckDB query: %q", query)
+		rows, err := stmt.Query()
+		if err != nil {
+			log.Printf("Failed to execute query: %v\nQuery was: %q", err, query)
+			return nil, fmt.Errorf("query execution failed: %v", err)
+		}
+		defer rows.Close()
+
+		// Get column names
+		columns, err := rows.Columns()
+		if err != nil {
+			log.Printf("Failed to get columns: %v", err)
+			return nil, fmt.Errorf("failed to get columns: %v", err)
+		}
+		// log.Printf("Query returned columns: %v", columns)
+
+		// Prepare result structure
+		var result []map[string]interface{}
+
+		// Process rows
+		for rows.Next() {
+			// Create a slice of interface{} to hold the values
+			values := make([]interface{}, len(columns))
+			valuePtrs := make([]interface{}, len(columns))
+
+			// Set up pointers to each interface{}
+			for i := range values {
+				valuePtrs[i] = &values[i]
+			}
+
+			// Scan the row into the values
+			if err := rows.Scan(valuePtrs...); err != nil {
+				log.Printf("Failed to scan row: %v", err)
+				return nil, fmt.Errorf("error scanning row: %v", err)
+			}
+
+			// Create a map for this row
+			row := make(map[string]interface{})
+
+			// Set each column in the map
+			for i, col := range columns {
+				val := values[i]
+
+				// Handle special cases for counts
+				if strings.Contains(col, "count") && val == nil {
+					row[col] = 0
+				} else {
+					row[col] = val
+				}
+			}
+
+			result = append(result, row)
+		}
+
+		if err := rows.Err(); err != nil {
+			log.Printf("Error iterating rows: %v", err)
+			return nil, fmt.Errorf("error iterating rows: %v", err)
+		}
+
+		// log.Printf("Query returned %d rows", len(result))
+		return result, nil
+	}
+
 	// Handle regular queries through DuckDB
 	// Parse the query
 	parsed, err := c.ParseQuery(query, dbName)
@@ -616,6 +721,10 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 		tableRegex := regexp.MustCompile(tablePattern)
 		restOfQuery := tableRegex.ReplaceAllString(originalParts[1], "")
 
+		// Remove LIMIT clause from the original query parts
+		limitRegex := regexp.MustCompile(`(?i)\s+LIMIT\s+\d+\s*$`)
+		restOfQuery = limitRegex.ReplaceAllString(restOfQuery, "")
+
 		if len(strings.TrimSpace(restOfQuery)) > 0 {
 			// Fix timestamp format - ensure timestamps have quotes
 			timestampRegex := regexp.MustCompile(`([^'])(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)`)
@@ -631,46 +740,46 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 		// Fallback to manually constructing the query
 		duckdbQuery = fmt.Sprintf("SELECT %s FROM read_parquet([%s], union_by_name=true)",
 			parsed.Columns, filesList.String())
+	}
 
-		// Add WHERE conditions
-		if parsed.TimeRange.TimeCondition != "" || len(parsed.WhereConditions) > 0 {
-			var conditions []string
+	// Add WHERE conditions
+	if parsed.TimeRange.TimeCondition != "" || len(parsed.WhereConditions) > 0 {
+		var conditions []string
 
-			if parsed.TimeRange.TimeCondition != "" {
-				conditions = append(conditions, parsed.TimeRange.TimeCondition)
-			}
-
-			if len(parsed.WhereConditions) > 0 {
-				// Fix timestamp format in WHERE clause
-				timestampRegex := regexp.MustCompile(`([^'])(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)`)
-				processedCond := timestampRegex.ReplaceAllString(parsed.WhereConditions, "$1'$2'")
-				conditions = append(conditions, processedCond)
-			}
-
-			if len(conditions) > 0 {
-				duckdbQuery += " WHERE " + strings.Join(conditions, " AND ")
-			}
+		if parsed.TimeRange.TimeCondition != "" {
+			conditions = append(conditions, parsed.TimeRange.TimeCondition)
 		}
 
-		// Add GROUP BY, HAVING, ORDER BY, and LIMIT
-		if len(parsed.GroupBy) > 0 {
-			duckdbQuery += " GROUP BY " + parsed.GroupBy
+		if len(parsed.WhereConditions) > 0 {
+			// Fix timestamp format in WHERE clause
+			timestampRegex := regexp.MustCompile(`([^'])(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)`)
+			processedCond := timestampRegex.ReplaceAllString(parsed.WhereConditions, "$1'$2'")
+			conditions = append(conditions, processedCond)
 		}
 
-		if len(parsed.Having) > 0 {
-			duckdbQuery += " HAVING " + parsed.Having
-		}
-
-		if len(parsed.OrderBy) > 0 {
-			duckdbQuery += " ORDER BY " + parsed.OrderBy
-		}
-
-		if parsed.Limit > 0 {
-			duckdbQuery += fmt.Sprintf(" LIMIT %d", parsed.Limit)
+		if len(conditions) > 0 {
+			duckdbQuery += " WHERE " + strings.Join(conditions, " AND ")
 		}
 	}
 
-	Debugf(ctx, "Created DuckDB query in: %v. Query: %s", time.Since(start), duckdbQuery)
+	// Add GROUP BY, HAVING, ORDER BY, and LIMIT
+	if len(parsed.GroupBy) > 0 {
+		duckdbQuery += " GROUP BY " + parsed.GroupBy
+	}
+
+	if len(parsed.Having) > 0 {
+		duckdbQuery += " HAVING " + parsed.Having
+	}
+
+	if len(parsed.OrderBy) > 0 {
+		duckdbQuery += " ORDER BY " + parsed.OrderBy
+	}
+
+	if parsed.Limit > 0 {
+		duckdbQuery += fmt.Sprintf(" LIMIT %d", parsed.Limit)
+	}
+
+	log.Printf("Created DuckDB query in: %v", time.Since(start))
 	start = time.Now()
 
 	// Execute the query
@@ -692,7 +801,7 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 		return nil, fmt.Errorf("failed to get columns: %v", err)
 	}
 
-	Debugf(ctx, "Retrieved first query result in: %v", time.Since(start))
+	// log.Printf("Retrieved first query result in: %v", time.Since(start))
 	start = time.Now()
 
 	// Prepare result structure
@@ -732,7 +841,7 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 		result = append(result, row)
 	}
 
-	Debugf(ctx, "Got query result in: %v", time.Since(start))
+	log.Printf("Got query result in: %v", time.Since(start))
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating rows: %v", err)

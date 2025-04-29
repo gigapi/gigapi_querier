@@ -104,12 +104,9 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		dbName = "mydb" // Default
 	}
 
-	Infof(ctx, "Executing query for database '%s': %s", dbName, req.Query)
-
 	// Execute query
 	results, err := s.QueryClient.Query(ctx, req.Query, dbName)
 	if err != nil {
-		Errorf(ctx, "Query error: %v", err)
 		sendErrorResponse(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -225,6 +222,11 @@ func main() {
 		port = "8080"
 	}
 
+	flightsqlPort := os.Getenv("FLIGHTSQL_PORT")
+	if flightsqlPort == "" {
+		flightsqlPort = "8082"
+	}
+
 	dataDir := os.Getenv("DATA_DIR")
 	if dataDir == "" {
 		dataDir = "./data"
@@ -272,11 +274,27 @@ func main() {
 	mux.HandleFunc("/health", server.handleHealth)
 	mux.HandleFunc("/query", server.handleQuery)
 
-	// Start server
+	// Start main server
 	Infof(ctx, "GigAPI server running at http://localhost:%s", port)
-	err = http.ListenAndServe(":"+port, mux)
+	go func() {
+		err = http.ListenAndServe(":"+port, mux)
+		if err != nil {
+			Errorf(ctx, "Failed to start main server: %v", err)
+			os.Exit(1)
+		}
+	}()
+
+	// Start FlightSQL server
+	flightsqlPortInt, err := strconv.Atoi(flightsqlPort)
 	if err != nil {
-		Errorf(ctx, "Failed to start server: %v", err)
+		Errorf(ctx, "Invalid FlightSQL port: %v", err)
+		os.Exit(1)
+	}
+
+	Infof(ctx, "FlightSQL server running on port %s", flightsqlPort)
+	err = StartFlightSQLServer(flightsqlPortInt, client)
+	if err != nil {
+		Errorf(ctx, "Failed to start FlightSQL server: %v", err)
 		os.Exit(1)
 	}
 }
