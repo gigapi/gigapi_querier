@@ -167,12 +167,12 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 		return timeRange
 	}
 
-	// Match time patterns
+	// Match time patterns including epoch_ns
 	timePatterns := []*regexp.Regexp{
-		regexp.MustCompile(`time\s*(>=|>)\s*'([^']+)'`),                    // time >= '2023-01-01T00:00:00'
-		regexp.MustCompile(`time\s*(<=|<)\s*'([^']+)'`),                    // time <= '2023-01-01T00:00:00'
-		regexp.MustCompile(`time\s*=\s*'([^']+)'`),                         // time = '2023-01-01T00:00:00'
-		regexp.MustCompile(`time\s+BETWEEN\s+'([^']+)'\s+AND\s+'([^']+)'`), // time BETWEEN '...' AND '...'
+		regexp.MustCompile(`time\s*(>=|>)\s*epoch_ns\('([^']+)'::TIMESTAMP\)`),                    // time >= epoch_ns('2023-01-01T00:00:00'::TIMESTAMP)
+		regexp.MustCompile(`time\s*(<=|<)\s*epoch_ns\('([^']+)'::TIMESTAMP\)`),                    // time <= epoch_ns('2023-01-01T00:00:00'::TIMESTAMP)
+		regexp.MustCompile(`time\s*=\s*epoch_ns\('([^']+)'::TIMESTAMP\)`),                         // time = epoch_ns('2023-01-01T00:00:00'::TIMESTAMP)
+		regexp.MustCompile(`time\s+BETWEEN\s+epoch_ns\('([^']+)'::TIMESTAMP\)\s+AND\s+epoch_ns\('([^']+)'::TIMESTAMP\)`), // time BETWEEN epoch_ns('...') AND epoch_ns('...')
 	}
 
 	// Check for BETWEEN pattern first
@@ -189,7 +189,7 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 			timeRange.End = &endNanos
 		}
 
-		timeRange.TimeCondition = fmt.Sprintf("time BETWEEN '%s' AND '%s'", match[1], match[2])
+		timeRange.TimeCondition = fmt.Sprintf("time BETWEEN epoch_ns('%s'::TIMESTAMP) AND epoch_ns('%s'::TIMESTAMP)", match[1], match[2])
 		return timeRange
 	}
 
@@ -200,7 +200,7 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 			startNanos := startTime.UnixNano()
 			timeRange.Start = &startNanos
 		}
-		timeRange.TimeCondition = fmt.Sprintf("time %s '%s'", match[1], match[2])
+		timeRange.TimeCondition = fmt.Sprintf("time %s epoch_ns('%s'::TIMESTAMP)", match[1], match[2])
 	}
 
 	// Check for <= pattern
@@ -212,9 +212,9 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 		}
 
 		if timeRange.TimeCondition != "" {
-			timeRange.TimeCondition = fmt.Sprintf("%s AND time %s '%s'", timeRange.TimeCondition, match[1], match[2])
+			timeRange.TimeCondition = fmt.Sprintf("%s AND time %s epoch_ns('%s'::TIMESTAMP)", timeRange.TimeCondition, match[1], match[2])
 		} else {
-			timeRange.TimeCondition = fmt.Sprintf("time %s '%s'", match[1], match[2])
+			timeRange.TimeCondition = fmt.Sprintf("time %s epoch_ns('%s'::TIMESTAMP)", match[1], match[2])
 		}
 	}
 
@@ -226,7 +226,7 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 			timeRange.Start = &exactNanos
 			timeRange.End = &exactNanos
 		}
-		timeRange.TimeCondition = fmt.Sprintf("time = '%s'", match[1])
+		timeRange.TimeCondition = fmt.Sprintf("time = epoch_ns('%s'::TIMESTAMP)", match[1])
 	}
 
 	return timeRange
@@ -721,66 +721,65 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 		tableRegex := regexp.MustCompile(tablePattern)
 		restOfQuery := tableRegex.ReplaceAllString(originalParts[1], "")
 
-		// Remove LIMIT clause from the original query parts
-		limitRegex := regexp.MustCompile(`(?i)\s+LIMIT\s+\d+\s*$`)
-		restOfQuery = limitRegex.ReplaceAllString(restOfQuery, "")
-
 		// Remove WHERE clause from restOfQuery since we'll add it separately
 		whereRegex := regexp.MustCompile(`(?i)\s+WHERE\s+.*?(?:\s+(?:GROUP|ORDER|LIMIT|$))`)
 		restOfQuery = whereRegex.ReplaceAllString(restOfQuery, "")
 
-		if len(strings.TrimSpace(restOfQuery)) > 0 {
-			// Fix timestamp format - ensure timestamps have quotes
-			timestampRegex := regexp.MustCompile(`([^'])(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)`)
-			restOfQuery = timestampRegex.ReplaceAllString(restOfQuery, "$1'$2'")
+		// Extract GROUP BY, ORDER BY, and LIMIT clauses
+		groupBy := ""
+		groupByPattern := regexp.MustCompile(`(?i)\s+GROUP\s+BY\s+(.*?)(?:\s+(?:ORDER|LIMIT|$))`)
+		if match := groupByPattern.FindStringSubmatch(restOfQuery); len(match) > 1 {
+			groupBy = strings.TrimSpace(match[1])
+		}
 
-			duckdbQuery = fmt.Sprintf("%s FROM read_parquet([%s], union_by_name=true) %s",
-				originalParts[0], filesList.String(), restOfQuery)
-		} else {
-			duckdbQuery = fmt.Sprintf("%s FROM read_parquet([%s], union_by_name=true)",
-				originalParts[0], filesList.String())
+		orderBy := ""
+		orderByPattern := regexp.MustCompile(`(?i)\s+ORDER\s+BY\s+(.*?)(?:\s+(?:LIMIT|$))`)
+		if match := orderByPattern.FindStringSubmatch(restOfQuery); len(match) > 1 {
+			orderBy = strings.TrimSpace(match[1])
+		}
+
+		limit := ""
+		limitPattern := regexp.MustCompile(`(?i)\s+LIMIT\s+(\d+)`)
+		if match := limitPattern.FindStringSubmatch(restOfQuery); len(match) > 1 {
+			limit = strings.TrimSpace(match[1])
+		}
+
+		// Build the query with the extracted clauses
+		duckdbQuery = fmt.Sprintf("%s FROM read_parquet([%s], union_by_name=true)",
+			originalParts[0], filesList.String())
+
+		// Add WHERE conditions
+		if parsed.TimeRange.TimeCondition != "" || len(parsed.WhereConditions) > 0 {
+			var conditions []string
+			if parsed.TimeRange.TimeCondition != "" {
+				conditions = append(conditions, parsed.TimeRange.TimeCondition)
+			}
+			if len(parsed.WhereConditions) > 0 {
+				conditions = append(conditions, parsed.WhereConditions)
+			}
+			if len(conditions) > 0 {
+				duckdbQuery += " WHERE " + strings.Join(conditions, " AND ")
+			}
+		}
+
+		// Add GROUP BY
+		if groupBy != "" {
+			duckdbQuery += " GROUP BY " + groupBy
+		}
+
+		// Add ORDER BY
+		if orderBy != "" {
+			duckdbQuery += " ORDER BY " + orderBy
+		}
+
+		// Add LIMIT
+		if limit != "" {
+			duckdbQuery += " LIMIT " + limit
 		}
 	} else {
 		// Fallback to manually constructing the query
 		duckdbQuery = fmt.Sprintf("SELECT %s FROM read_parquet([%s], union_by_name=true)",
 			parsed.Columns, filesList.String())
-	}
-
-	// Add WHERE conditions
-	if parsed.TimeRange.TimeCondition != "" || len(parsed.WhereConditions) > 0 {
-		var conditions []string
-
-		if parsed.TimeRange.TimeCondition != "" {
-			conditions = append(conditions, parsed.TimeRange.TimeCondition)
-		}
-
-		if len(parsed.WhereConditions) > 0 {
-			// Fix timestamp format in WHERE clause
-			timestampRegex := regexp.MustCompile(`([^'])(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)`)
-			processedCond := timestampRegex.ReplaceAllString(parsed.WhereConditions, "$1'$2'")
-			conditions = append(conditions, processedCond)
-		}
-
-		if len(conditions) > 0 {
-			duckdbQuery += " WHERE " + strings.Join(conditions, " AND ")
-		}
-	}
-
-	// Add GROUP BY, HAVING, ORDER BY, and LIMIT
-	if len(parsed.GroupBy) > 0 {
-		duckdbQuery += " GROUP BY " + parsed.GroupBy
-	}
-
-	if len(parsed.Having) > 0 {
-		duckdbQuery += " HAVING " + parsed.Having
-	}
-
-	if len(parsed.OrderBy) > 0 {
-		duckdbQuery += " ORDER BY " + parsed.OrderBy
-	}
-
-	if parsed.Limit > 0 {
-		duckdbQuery += fmt.Sprintf(" LIMIT %d", parsed.Limit)
 	}
 
 	log.Printf("Created DuckDB query in: %v", time.Since(start))
