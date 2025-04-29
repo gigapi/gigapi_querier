@@ -110,6 +110,8 @@ func (q *QueryClient) ParseQuery(sql, dbName string) (*ParsedQuery, error) {
 		}
 	}
 
+	log.Printf("Extracted WHERE clause: %s", whereClause)
+
 	// Extract time range
 	timeRange := q.extractTimeRange(whereClause)
 
@@ -227,6 +229,13 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 			timeRange.End = &exactNanos
 		}
 		timeRange.TimeCondition = fmt.Sprintf("time = epoch_ns('%s'::TIMESTAMP)", match[1])
+	}
+
+	// Log the extracted time range for debugging
+	if timeRange.Start != nil || timeRange.End != nil {
+		log.Printf("Extracted time range: %v to %v", 
+			time.Unix(0, *timeRange.Start).Format(time.RFC3339Nano),
+			time.Unix(0, *timeRange.End).Format(time.RFC3339Nano))
 	}
 
 	return timeRange
@@ -721,61 +730,9 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 		tableRegex := regexp.MustCompile(tablePattern)
 		restOfQuery := tableRegex.ReplaceAllString(originalParts[1], "")
 
-		// Remove WHERE clause from restOfQuery since we'll add it separately
-		whereRegex := regexp.MustCompile(`(?i)\s+WHERE\s+.*?(?:\s+(?:GROUP|ORDER|LIMIT|$))`)
-		restOfQuery = whereRegex.ReplaceAllString(restOfQuery, "")
-
-		// Extract GROUP BY, ORDER BY, and LIMIT clauses
-		groupBy := ""
-		groupByPattern := regexp.MustCompile(`(?i)\s+GROUP\s+BY\s+(.*?)(?:\s+(?:ORDER|LIMIT|$))`)
-		if match := groupByPattern.FindStringSubmatch(restOfQuery); len(match) > 1 {
-			groupBy = strings.TrimSpace(match[1])
-		}
-
-		orderBy := ""
-		orderByPattern := regexp.MustCompile(`(?i)\s+ORDER\s+BY\s+(.*?)(?:\s+(?:LIMIT|$))`)
-		if match := orderByPattern.FindStringSubmatch(restOfQuery); len(match) > 1 {
-			orderBy = strings.TrimSpace(match[1])
-		}
-
-		limit := ""
-		limitPattern := regexp.MustCompile(`(?i)\s+LIMIT\s+(\d+)`)
-		if match := limitPattern.FindStringSubmatch(restOfQuery); len(match) > 1 {
-			limit = strings.TrimSpace(match[1])
-		}
-
-		// Build the query with the extracted clauses
-		duckdbQuery = fmt.Sprintf("%s FROM read_parquet([%s], union_by_name=true)",
-			originalParts[0], filesList.String())
-
-		// Add WHERE conditions
-		if parsed.TimeRange.TimeCondition != "" || len(parsed.WhereConditions) > 0 {
-			var conditions []string
-			if parsed.TimeRange.TimeCondition != "" {
-				conditions = append(conditions, parsed.TimeRange.TimeCondition)
-			}
-			if len(parsed.WhereConditions) > 0 {
-				conditions = append(conditions, parsed.WhereConditions)
-			}
-			if len(conditions) > 0 {
-				duckdbQuery += " WHERE " + strings.Join(conditions, " AND ")
-			}
-		}
-
-		// Add GROUP BY
-		if groupBy != "" {
-			duckdbQuery += " GROUP BY " + groupBy
-		}
-
-		// Add ORDER BY
-		if orderBy != "" {
-			duckdbQuery += " ORDER BY " + orderBy
-		}
-
-		// Add LIMIT
-		if limit != "" {
-			duckdbQuery += " LIMIT " + limit
-		}
+		// Simply replace the FROM clause with our parquet files
+		duckdbQuery = fmt.Sprintf("%s FROM read_parquet([%s], union_by_name=true)%s",
+			originalParts[0], filesList.String(), restOfQuery)
 	} else {
 		// Fallback to manually constructing the query
 		duckdbQuery = fmt.Sprintf("SELECT %s FROM read_parquet([%s], union_by_name=true)",
