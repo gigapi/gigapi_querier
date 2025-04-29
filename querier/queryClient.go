@@ -185,11 +185,6 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 		regexp.MustCompile(`time\s*(<=|<)\s*'([^']+)'`),                    // time <= '2023-01-01T00:00:00Z'
 		regexp.MustCompile(`time\s*=\s*'([^']+)'`),                         // time = '2023-01-01T00:00:00Z'
 		regexp.MustCompile(`time\s+BETWEEN\s+'([^']+)'\s+AND\s+'([^']+)'`), // time BETWEEN '...' AND '...'
-		// Cast timestamp format
-		regexp.MustCompile(`time\s*(>=|>)\s*cast\('([^']+)'\s+as\s+timestamp\)`),                    // time >= cast('2023-01-01T00:00:00Z' as timestamp)
-		regexp.MustCompile(`time\s*(<=|<)\s*cast\('([^']+)'\s+as\s+timestamp\)`),                    // time <= cast('2023-01-01T00:00:00Z' as timestamp)
-		regexp.MustCompile(`time\s*=\s*cast\('([^']+)'\s+as\s+timestamp\)`),                         // time = cast('2023-01-01T00:00:00Z' as timestamp)
-		regexp.MustCompile(`time\s+BETWEEN\s+cast\('([^']+)'\s+as\s+timestamp\)\s+AND\s+cast\('([^']+)'\s+as\s+timestamp\)`), // time BETWEEN cast('...') AND cast('...')
 		// epoch_ns format
 		regexp.MustCompile(`time\s*(>=|>)\s*epoch_ns\((?:cast\('([^']+)' as timestamp\)::TIMESTAMP|'([^']+)'::TIMESTAMP)\)`),                    // time >= epoch_ns('2023-01-01T00:00:00'::TIMESTAMP) or time >= epoch_ns(cast('2023-01-01T00:00:00' as timestamp)::TIMESTAMP)
 		regexp.MustCompile(`time\s*(<=|<)\s*epoch_ns\((?:cast\('([^']+)' as timestamp\)::TIMESTAMP|'([^']+)'::TIMESTAMP)\)`),                    // time <= epoch_ns('2023-01-01T00:00:00'::TIMESTAMP) or time <= epoch_ns(cast('2023-01-01T00:00:00' as timestamp)::TIMESTAMP)
