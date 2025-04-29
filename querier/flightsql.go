@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/grpc/metadata"
 )
 
 // FlightSQLServer implements the FlightSQL server interface
@@ -131,8 +132,23 @@ func (s *FlightSQLServer) GetFlightInfo(ctx context.Context, desc *flight.Flight
 			}, query)
 			log.Printf("Executing SQL query: %v", query)
 
+			// Get database name from metadata if available
+			dbName := "default" // Default database name
+			if md, ok := metadata.FromIncomingContext(ctx); ok {
+				if bucket := md.Get("bucket"); len(bucket) > 0 {
+					dbName = bucket[0]
+					log.Printf("Using bucket from metadata: %s", dbName)
+				} else if namespace := md.Get("database"); len(namespace) > 0 {
+					dbName = namespace[0]
+					log.Printf("Using database from metadata: %s", dbName)
+				} else if namespace := md.Get("namespace"); len(namespace) > 0 {
+					dbName = namespace[0]
+					log.Printf("Using namespace from metadata: %s", dbName)
+				}
+			}
+
 			// Execute the query using our existing QueryClient
-			results, err := s.queryClient.Query(ctx, query, "mydb") // Using default database for now
+			results, err := s.queryClient.Query(ctx, query, dbName)
 			if err != nil {
 				log.Printf("Query execution failed: %v", err)
 				return nil, fmt.Errorf("failed to execute query: %w", err)
