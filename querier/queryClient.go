@@ -167,86 +167,121 @@ func (q *QueryClient) extractTimeRange(whereClause string) TimeRange {
 		return timeRange
 	}
 
-	// Match time patterns including epoch_ns
+	// Match time patterns including epoch_ns with various timestamp formats
 	timePatterns := []*regexp.Regexp{
-		regexp.MustCompile(`time\s*(>=|>)\s*epoch_ns\('([^']+)'::TIMESTAMP\)`),                    // time >= epoch_ns('2023-01-01T00:00:00'::TIMESTAMP)
-		regexp.MustCompile(`time\s*(<=|<)\s*epoch_ns\('([^']+)'::TIMESTAMP\)`),                    // time <= epoch_ns('2023-01-01T00:00:00'::TIMESTAMP)
-		regexp.MustCompile(`time\s*=\s*epoch_ns\('([^']+)'::TIMESTAMP\)`),                         // time = epoch_ns('2023-01-01T00:00:00'::TIMESTAMP)
-		regexp.MustCompile(`time\s+BETWEEN\s+epoch_ns\('([^']+)'::TIMESTAMP\)\s+AND\s+epoch_ns\('([^']+)'::TIMESTAMP\)`), // time BETWEEN epoch_ns('...') AND epoch_ns('...')
+		regexp.MustCompile(`time\s*(>=|>)\s*epoch_ns\((?:cast\('([^']+)' as timestamp\)::TIMESTAMP|'([^']+)'::TIMESTAMP)\)`),                    // time >= epoch_ns('2023-01-01T00:00:00'::TIMESTAMP) or time >= epoch_ns(cast('2023-01-01T00:00:00' as timestamp)::TIMESTAMP)
+		regexp.MustCompile(`time\s*(<=|<)\s*epoch_ns\((?:cast\('([^']+)' as timestamp\)::TIMESTAMP|'([^']+)'::TIMESTAMP)\)`),                    // time <= epoch_ns('2023-01-01T00:00:00'::TIMESTAMP) or time <= epoch_ns(cast('2023-01-01T00:00:00' as timestamp)::TIMESTAMP)
+		regexp.MustCompile(`time\s*=\s*epoch_ns\((?:cast\('([^']+)' as timestamp\)::TIMESTAMP|'([^']+)'::TIMESTAMP)\)`),                         // time = epoch_ns('2023-01-01T00:00:00'::TIMESTAMP) or time = epoch_ns(cast('2023-01-01T00:00:00' as timestamp)::TIMESTAMP)
+		regexp.MustCompile(`time\s+BETWEEN\s+epoch_ns\((?:cast\('([^']+)' as timestamp\)::TIMESTAMP|'([^']+)'::TIMESTAMP)\)\s+AND\s+epoch_ns\((?:cast\('([^']+)' as timestamp\)::TIMESTAMP|'([^']+)'::TIMESTAMP)\)`), // time BETWEEN epoch_ns('...') AND epoch_ns('...') with cast
 	}
 
 	// Helper function to parse time with UTC timezone
 	parseTime := func(timeStr string) (time.Time, error) {
 		// Try parsing with UTC timezone first
-		t, err := time.Parse("2006-01-02T15:04:05Z", timeStr+"Z")
+		t, err := time.Parse("2006-01-02T15:04:05Z", timeStr)
 		if err == nil {
 			return t, nil
 		}
 		// Try parsing with nanosecond precision
-		t, err = time.Parse("2006-01-02T15:04:05.999999999Z", timeStr+"Z")
+		t, err = time.Parse("2006-01-02T15:04:05.999999999Z", timeStr)
 		if err == nil {
 			return t, nil
 		}
 		// Try parsing with timezone offset
-		t, err = time.Parse("2006-01-02T15:04:05-07:00", timeStr+"Z")
+		t, err = time.Parse("2006-01-02T15:04:05-07:00", timeStr)
 		if err == nil {
 			return t, nil
+		}
+		// Try parsing without timezone (assume UTC)
+		t, err = time.Parse("2006-01-02T15:04:05", timeStr)
+		if err == nil {
+			return t.UTC(), nil
 		}
 		return time.Time{}, fmt.Errorf("failed to parse time: %v", err)
 	}
 
+	// Helper function to extract timestamp from match
+	extractTimestamp := func(match []string, index int) string {
+		if len(match) > index {
+			// Check both possible capture groups for cast and direct timestamp
+			if match[index] != "" {
+				return match[index]
+			}
+			if len(match) > index+1 && match[index+1] != "" {
+				return match[index+1]
+			}
+		}
+		return ""
+	}
+
 	// Check for BETWEEN pattern first
 	if match := timePatterns[3].FindStringSubmatch(whereClause); len(match) > 2 {
-		startTime, err := parseTime(match[1])
-		if err == nil {
-			startNanos := startTime.UnixNano()
-			timeRange.Start = &startNanos
+		startTimeStr := extractTimestamp(match, 1)
+		endTimeStr := extractTimestamp(match, 3)
+		
+		if startTimeStr != "" {
+			startTime, err := parseTime(startTimeStr)
+			if err == nil {
+				startNanos := startTime.UnixNano()
+				timeRange.Start = &startNanos
+			}
 		}
 
-		endTime, err := parseTime(match[2])
-		if err == nil {
-			endNanos := endTime.UnixNano()
-			timeRange.End = &endNanos
+		if endTimeStr != "" {
+			endTime, err := parseTime(endTimeStr)
+			if err == nil {
+				endNanos := endTime.UnixNano()
+				timeRange.End = &endNanos
+			}
 		}
 
-		timeRange.TimeCondition = fmt.Sprintf("time BETWEEN epoch_ns('%s'::TIMESTAMP) AND epoch_ns('%s'::TIMESTAMP)", match[1], match[2])
+		timeRange.TimeCondition = fmt.Sprintf("time BETWEEN epoch_ns('%s'::TIMESTAMP) AND epoch_ns('%s'::TIMESTAMP)", startTimeStr, endTimeStr)
 		return timeRange
 	}
 
 	// Check for >= pattern
 	if match := timePatterns[0].FindStringSubmatch(whereClause); len(match) > 2 {
-		startTime, err := parseTime(match[2])
-		if err == nil {
-			startNanos := startTime.UnixNano()
-			timeRange.Start = &startNanos
+		timeStr := extractTimestamp(match, 2)
+		if timeStr != "" {
+			startTime, err := parseTime(timeStr)
+			if err == nil {
+				startNanos := startTime.UnixNano()
+				timeRange.Start = &startNanos
+			}
 		}
-		timeRange.TimeCondition = fmt.Sprintf("time %s epoch_ns('%s'::TIMESTAMP)", match[1], match[2])
+		timeRange.TimeCondition = fmt.Sprintf("time %s epoch_ns('%s'::TIMESTAMP)", match[1], timeStr)
 	}
 
 	// Check for <= pattern
 	if match := timePatterns[1].FindStringSubmatch(whereClause); len(match) > 2 {
-		endTime, err := parseTime(match[2])
-		if err == nil {
-			endNanos := endTime.UnixNano()
-			timeRange.End = &endNanos
+		timeStr := extractTimestamp(match, 2)
+		if timeStr != "" {
+			endTime, err := parseTime(timeStr)
+			if err == nil {
+				endNanos := endTime.UnixNano()
+				timeRange.End = &endNanos
+			}
 		}
 
 		if timeRange.TimeCondition != "" {
-			timeRange.TimeCondition = fmt.Sprintf("%s AND time %s epoch_ns('%s'::TIMESTAMP)", timeRange.TimeCondition, match[1], match[2])
+			timeRange.TimeCondition = fmt.Sprintf("%s AND time %s epoch_ns('%s'::TIMESTAMP)", timeRange.TimeCondition, match[1], timeStr)
 		} else {
-			timeRange.TimeCondition = fmt.Sprintf("time %s epoch_ns('%s'::TIMESTAMP)", match[1], match[2])
+			timeRange.TimeCondition = fmt.Sprintf("time %s epoch_ns('%s'::TIMESTAMP)", match[1], timeStr)
 		}
 	}
 
 	// Check for = pattern
 	if match := timePatterns[2].FindStringSubmatch(whereClause); len(match) > 1 {
-		exactTime, err := parseTime(match[1])
-		if err == nil {
-			exactNanos := exactTime.UnixNano()
-			timeRange.Start = &exactNanos
-			timeRange.End = &exactNanos
+		timeStr := extractTimestamp(match, 1)
+		if timeStr != "" {
+			exactTime, err := parseTime(timeStr)
+			if err == nil {
+				exactNanos := exactTime.UnixNano()
+				timeRange.Start = &exactNanos
+				timeRange.End = &exactNanos
+			}
 		}
-		timeRange.TimeCondition = fmt.Sprintf("time = epoch_ns('%s'::TIMESTAMP)", match[1])
+		timeRange.TimeCondition = fmt.Sprintf("time = epoch_ns('%s'::TIMESTAMP)", timeStr)
 	}
 
 	return timeRange
