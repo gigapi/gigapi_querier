@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/grpc/metadata"
 )
 
 // FlightSQLServer implements the FlightSQL server interface
@@ -131,8 +132,22 @@ func (s *FlightSQLServer) GetFlightInfo(ctx context.Context, desc *flight.Flight
 			}, query)
 			log.Printf("Executing SQL query: %v", query)
 
+			dbName := "default" // Default database name
+			if md, ok := metadata.FromIncomingContext(ctx); ok {
+				if bucket := md.Get("bucket"); len(bucket) > 0 {
+					dbName = bucket[0]
+					log.Printf("Using bucket from metadata: %s", dbName)
+				} else if namespace := md.Get("database"); len(namespace) > 0 {
+					dbName = namespace[0]
+					log.Printf("Using database from metadata: %s", dbName)
+				} else if namespace := md.Get("namespace"); len(namespace) > 0 {
+					dbName = namespace[0]
+					log.Printf("Using namespace from metadata: %s", dbName)
+				}
+			}
+
 			// Parse the query to extract time range
-			parsed, err := s.queryClient.ParseQuery(query, "mydb")
+			parsed, err := s.queryClient.ParseQuery(query, dbName)
 			if err != nil {
 				log.Printf("Failed to parse query: %v", err)
 				return nil, fmt.Errorf("failed to parse query: %w", err)
@@ -209,7 +224,7 @@ func (s *FlightSQLServer) GetFlightInfoStatement(ctx context.Context, cmd *fligh
 	query := string(desc.Cmd)
 
 	// Execute the query using our existing QueryClient
-	results, err := s.queryClient.Query(ctx, query, "mydb") // Using default database for now
+	results, err := s.queryClient.Query(ctx, query, "default") // Using default database for now
 	if err != nil {
 		log.Printf("Query execution failed: %v", err)
 		return nil, fmt.Errorf("failed to execute query: %w", err)
