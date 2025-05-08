@@ -17,7 +17,7 @@ func main() {
 	ctx := core.WithDefaultLogger(context.Background(), "main")
 	// Add command line flags
 	queryFlag := flag.String("query", "", "Execute a single query and exit")
-	dbFlag := flag.String("db", "mydb", "Database name to query")
+	dbFlag := flag.String("db", "default", "Database name to query")
 	flag.Parse()
 
 	// Get configuration from environment variables
@@ -33,7 +33,10 @@ func main() {
 
 	dataDir := os.Getenv("DATA_DIR")
 	if dataDir == "" {
-		dataDir = "./data"
+		dataDir = os.Getenv("GIGAPI_ROOT")
+		if dataDir == "" {
+			dataDir = "./data"
+		}
 	}
 
 	// Create QueryClient
