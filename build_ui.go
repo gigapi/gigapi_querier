@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	defaultUIReleaseURL = "https://github.com/gigapi/gigapi-ui/releases/download/v1.0.0/release.zip"
+	defaultUIReleaseURL = "https://github.com/gigapi/gigapi-ui/releases/latest/download/release.zip"
 	uiZipFile           = "ui.zip"
 	targetDir           = "querier"
 )
