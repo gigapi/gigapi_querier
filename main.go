@@ -1,3 +1,4 @@
+//go:generate go run build_ui.go
 package main
 
 import (

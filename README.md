@@ -30,7 +30,8 @@ gigapi-querier:
 ### Build
 ```bash
 # Build from source
-go build -o gigapi *.go
+go generate
+go build -o gq .
 
 # Start the server
 PORT=8080 DATA_DIR=./data ./gigapi
