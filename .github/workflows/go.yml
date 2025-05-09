@@ -25,5 +25,6 @@ jobs:
     - name: Test Build
       run: |
         go mod tidy
+        go generate
         go build --ldflags '-linkmode=external -extldflags=-static' -o gigapi_querier ./
 
