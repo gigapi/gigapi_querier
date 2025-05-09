@@ -12,7 +12,13 @@ import (
 	"strconv"
 	"sync/atomic"
 	"time"
+	"embed"
+	"io/fs"
+	"path"
 )
+
+//go:embed dist/**
+var distFS embed.FS
 
 //go:embed ui.html
 var uiContent []byte
@@ -178,29 +184,37 @@ func (s *Server) HandleHealth(w http.ResponseWriter, r *http.Request) {
 
 // HandleUI serves the main UI page
 func (s *Server) HandleUI(w http.ResponseWriter, r *http.Request) {
-	// If UI is disabled, return 404
 	if s.DisableUI {
 		http.NotFound(w, r)
 		return
 	}
-
-	// Add CORS headers
 	addCORSHeaders(w)
-
-	// Only allow GET requests
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Set proper headers
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(uiContent)))
-
-	// Write the embedded UI content
-	if _, err := w.Write(uiContent); err != nil {
-		log.Printf("Error writing response: %v", err)
+	// Serve static files from dist
+	dist, err := fs.Sub(distFS, "dist")
+	if err != nil {
+		log.Printf("Error accessing embedded dist: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
 	}
+	fileServer := http.FileServer(http.FS(dist))
+
+	// Try to serve the requested file
+	requestedPath := r.URL.Path
+	if requestedPath == "/" || requestedPath == "" {
+		requestedPath = "/index.html"
+	}
+	// Check if file exists in embedded FS
+	_, err = dist.Open(path.Clean(requestedPath))
+	if err != nil {
+		// Fallback to index.html for SPA routes
+		r.URL.Path = "/index.html"
+	}
+	fileServer.ServeHTTP(w, r)
 }
 
 // Close the server and release resources
