@@ -20,7 +20,10 @@ func WithNoError(hndl func(w http.ResponseWriter, r *http.Request),
 func Init(api modules.Api) {
 	dataDir := os.Getenv("DATA_DIR")
 	if dataDir == "" {
-		dataDir = "./data"
+		dataDir = os.Getenv("GIGAPI_ROOT")
+		if dataDir == "" {
+			dataDir = "./data"
+		}
 	}
 	var err error
 	server, err = querier.NewServer(dataDir)
