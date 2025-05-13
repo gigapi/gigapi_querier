@@ -2,31 +2,32 @@
 package querier
 
 import (
+	"archive/zip"
+	"bytes"
 	_ "embed"
 	"encoding/json"
 	"fmt"
 	"github.com/gigapi/gigapi-querier/core"
+	"github.com/spf13/afero"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"path"
+	"path/filepath"
 	"strconv"
 	"sync/atomic"
 	"time"
-	"embed"
-	"io/fs"
-	"path"
 )
 
-//go:embed dist/**
-var distFS embed.FS
-
-//go:embed ui.html
-var uiContent []byte
+//go:embed ui.zip
+var ui []byte
 
 // Server represents the API server
 type Server struct {
 	QueryClient *QueryClient
 	DisableUI   bool
+	UIFS        afero.Fs
 }
 
 // NewServer creates a new server instance
@@ -39,10 +40,53 @@ func NewServer(dataDir string) (*Server, error) {
 
 	disableUI := os.Getenv("DISABLE_UI") == "true"
 
+	memFS := afero.NewMemMapFs()
+
+	// Unzip UI files into memory
+	if err := unzipToMemFS(memFS, ui); err != nil {
+		return nil, fmt.Errorf("failed to unzip UI: %w", err)
+	}
+
 	return &Server{
 		QueryClient: client,
 		DisableUI:   disableUI,
+		UIFS:        memFS,
 	}, nil
+}
+
+func unzipToMemFS(memFS afero.Fs, zipData []byte) error {
+	zipReader, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
+	if err != nil {
+		return err
+	}
+
+	for _, zipFile := range zipReader.File {
+		fpath := filepath.Clean(zipFile.Name)
+		if zipFile.FileInfo().IsDir() {
+			memFS.MkdirAll(fpath, zipFile.Mode())
+			continue
+		}
+
+		rc, err := zipFile.Open()
+		if err != nil {
+			return err
+		}
+
+		file, err := memFS.Create(fpath)
+		if err != nil {
+			rc.Close()
+			return err
+		}
+
+		_, err = io.Copy(file, rc)
+		file.Close()
+		rc.Close()
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // QueryRequest represents a query API request
@@ -195,24 +239,28 @@ func (s *Server) HandleUI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Serve static files from dist
-	dist, err := fs.Sub(distFS, "dist")
-	if err != nil {
-		log.Printf("Error accessing embedded dist: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-	fileServer := http.FileServer(http.FS(dist))
+	distFS := afero.NewBasePathFs(s.UIFS, "dist")
+	httpFS := afero.NewHttpFs(distFS)
+	fileServer := http.FileServer(httpFS)
 
 	// Try to serve the requested file
 	requestedPath := r.URL.Path
 	if requestedPath == "/" || requestedPath == "" {
-		requestedPath = "/index.html"
+		content, err := distFS.Open("index.html")
+		if err != nil {
+			log.Printf("Error reading index.html: %v", err)
+			http.Error(w, "Internal server error", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(200)
+		io.Copy(w, content)
+		return
 	}
 	// Check if file exists in embedded FS
-	_, err = dist.Open(path.Clean(requestedPath))
+	_, err := distFS.Stat(path.Clean(requestedPath))
 	if err != nil {
-		// Fallback to index.html for SPA routes
-		r.URL.Path = "/index.html"
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
 	}
 	fileServer.ServeHTTP(w, r)
 }

@@ -36,7 +36,6 @@ jobs:
     - name: Compile HEPAgent ${{ matrix.goarch }}
       run: |
         go mod tidy
-        go generate
         go build --ldflags '-linkmode=external -extldflags=-static' -o gigapi_querier ./
     - name: glibc polyfill
       run: |
