@@ -2,6 +2,7 @@ package module
 
 import (
 	"github.com/gigapi/gigapi-querier/querier"
+	"github.com/gigapi/gigapi/v2/config"
 	"github.com/gigapi/gigapi/v2/modules"
 	"net/http"
 	"os"
@@ -20,7 +21,7 @@ func WithNoError(hndl func(w http.ResponseWriter, r *http.Request),
 func Init(api modules.Api) {
 	dataDir := os.Getenv("DATA_DIR")
 	if dataDir == "" {
-		dataDir = os.Getenv("GIGAPI_ROOT")
+		dataDir = config.Config.Gigapi.Root
 		if dataDir == "" {
 			dataDir = "./data"
 		}
