@@ -39,21 +39,16 @@ func Init(api modules.Api) {
 		Handler: WithNoError(server.HandleQuery),
 	})
 	api.RegisterRoute(&modules.Route{
-		Path:    "/query ",
-		Methods: []string{"GET", "POST", "OPTIONS"},
-		Handler: WithNoError(server.HandleQuery),
-	})
-	api.RegisterRoute(&modules.Route{
 		Path:    "/",
 		Methods: []string{"GET", "OPTIONS"},
 		Handler: WithNoError(server.HandleUI),
 	})
-	afero.Walk(server.UIFS, ".", func(path string, d fs.FileInfo, err error) error {
+	afero.Walk(server.UIFS, "/", func(path string, d fs.FileInfo, err error) error {
 		if d == nil || len(path) <= 5 {
 			return nil
 		}
 		api.RegisterRoute(&modules.Route{
-			Path:    "/" + path[len("dist/"):],
+			Path:    path[len("/dist"):],
 			Methods: []string{"GET"},
 			Handler: WithNoError(server.HandleUI),
 		})

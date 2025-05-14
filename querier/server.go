@@ -16,6 +16,7 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -54,6 +55,24 @@ func NewServer(dataDir string) (*Server, error) {
 	}, nil
 }
 
+func unzipFileToMemFS(memFS afero.Fs, zipFile *zip.File, absPath string) error {
+	rc, err := zipFile.Open()
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+
+	file, err := memFS.Create(absPath)
+	if err != nil {
+		rc.Close()
+		return err
+	}
+	defer file.Close()
+
+	_, err = io.Copy(file, rc)
+	return err
+}
+
 func unzipToMemFS(memFS afero.Fs, zipData []byte) error {
 	zipReader, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
 	if err != nil {
@@ -61,26 +80,20 @@ func unzipToMemFS(memFS afero.Fs, zipData []byte) error {
 	}
 
 	for _, zipFile := range zipReader.File {
-		fpath := filepath.Clean(zipFile.Name)
-		if zipFile.FileInfo().IsDir() {
-			memFS.MkdirAll(fpath, zipFile.Mode())
+		fpath := filepath.Clean("/" + zipFile.Name)
+
+		root := "/"
+		absPath := filepath.Join(root, fpath)
+		if !strings.HasPrefix(absPath, filepath.Clean(root)) {
+			log.Printf("Skipping file with invalid path: %s", zipFile.Name)
 			continue
 		}
 
-		rc, err := zipFile.Open()
-		if err != nil {
-			return err
+		if zipFile.FileInfo().IsDir() {
+			memFS.MkdirAll(absPath, zipFile.Mode())
+			continue
 		}
-
-		file, err := memFS.Create(fpath)
-		if err != nil {
-			rc.Close()
-			return err
-		}
-
-		_, err = io.Copy(file, rc)
-		file.Close()
-		rc.Close()
+		err = unzipFileToMemFS(memFS, zipFile, absPath)
 		if err != nil {
 			return err
 		}
@@ -239,7 +252,7 @@ func (s *Server) HandleUI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Serve static files from dist
-	distFS := afero.NewBasePathFs(s.UIFS, "dist")
+	distFS := afero.NewBasePathFs(s.UIFS, "/dist")
 	httpFS := afero.NewHttpFs(distFS)
 	fileServer := http.FileServer(httpFS)
 
