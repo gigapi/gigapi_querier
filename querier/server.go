@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"github.com/gigapi/gigapi-config/config"
 	"github.com/gigapi/gigapi-querier/core"
 	"github.com/spf13/afero"
 	"io"
@@ -31,6 +32,18 @@ type Server struct {
 	UIFS        afero.Fs
 }
 
+func GetRootDir() string {
+	dataDir := os.Getenv("DATA_DIR")
+	if dataDir != "" {
+		return dataDir
+	}
+	dataDir = config.Config.Gigapi.Root
+	if dataDir != "" {
+		return dataDir
+	}
+	return "./data"
+}
+
 // NewServer creates a new server instance
 func NewServer(dataDir string) (*Server, error) {
 	client := NewQueryClient(dataDir)
@@ -39,7 +52,7 @@ func NewServer(dataDir string) (*Server, error) {
 		return nil, err
 	}
 
-	disableUI := os.Getenv("DISABLE_UI") == "true"
+	disableUI := config.Config.DisableUI
 
 	memFS := afero.NewMemMapFs()
 
@@ -64,7 +77,6 @@ func unzipFileToMemFS(memFS afero.Fs, zipFile *zip.File, absPath string) error {
 
 	file, err := memFS.Create(absPath)
 	if err != nil {
-		rc.Close()
 		return err
 	}
 	defer file.Close()

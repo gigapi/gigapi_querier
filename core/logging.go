@@ -2,9 +2,9 @@ package core
 
 import (
 	"context"
+	config2 "github.com/gigapi/gigapi-config/config"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"os"
 )
 
 const LoggerKey = "LOGGER"
@@ -13,12 +13,12 @@ func getLogger(ctx context.Context) *zap.Logger {
 	if ctx == nil {
 		return zap.NewNop()
 	}
-	
+
 	logger, ok := ctx.Value(LoggerKey).(*zap.Logger)
 	if !ok || logger == nil {
 		return zap.NewNop()
 	}
-	
+
 	return logger
 }
 
@@ -34,7 +34,7 @@ func DefaultLogger(reqId string) *zap.Logger {
 	config := zap.NewProductionConfig()
 
 	// Get log level from environment variable
-	logLevel := os.Getenv("LOGLEVEL")
+	logLevel := config2.Config.Loglevel
 	if level, err := zapcore.ParseLevel(logLevel); logLevel != "" && err == nil {
 		config.Level.SetLevel(level)
 	} else {
@@ -55,4 +55,4 @@ func Errorf(ctx context.Context, tpl string, args ...any) {
 
 func Debugf(ctx context.Context, tpl string, args ...any) {
 	getLogger(ctx).Sugar().Debugf(tpl, args...)
-} 
+}

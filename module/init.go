@@ -1,13 +1,12 @@
 package module
 
 import (
+	"github.com/gigapi/gigapi-config/config"
 	"github.com/gigapi/gigapi-querier/querier"
-	"github.com/gigapi/gigapi/v2/config"
 	"github.com/gigapi/gigapi/v2/modules"
 	"github.com/spf13/afero"
 	"io/fs"
 	"net/http"
-	"os"
 )
 
 var server *querier.Server
@@ -21,15 +20,11 @@ func WithNoError(hndl func(w http.ResponseWriter, r *http.Request),
 }
 
 func Init(api modules.Api) {
-	dataDir := os.Getenv("DATA_DIR")
-	if dataDir == "" {
-		dataDir = config.Config.Gigapi.Root
-		if dataDir == "" {
-			dataDir = "./data"
-		}
+	if config.Config.Mode != "readonly" && config.Config.Mode != "aio" {
+		return
 	}
 	var err error
-	server, err = querier.NewServer(dataDir)
+	server, err = querier.NewServer(querier.GetRootDir())
 	if err != nil {
 		panic(err)
 	}

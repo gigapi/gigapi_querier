@@ -1,12 +1,13 @@
 module github.com/gigapi/gigapi-querier
 
-go 1.24.1
+go 1.24.2
 
 require (
 	github.com/apache/arrow/go/v14 v14.0.2
+	github.com/gigapi/gigapi-config v0.0.4
 	github.com/gigapi/gigapi/v2 v2.0.13
 	github.com/marcboeker/go-duckdb/v2 v2.2.0
-	github.com/spf13/afero v1.11.0
+	github.com/spf13/afero v1.12.0
 	github.com/stretchr/testify v1.10.0
 	go.uber.org/zap v1.27.0
 	google.golang.org/grpc v1.69.2
@@ -54,7 +55,7 @@ require (
 	golang.org/x/text v0.24.0 // indirect
 	golang.org/x/tools v0.29.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20241104194629-dd2ea8efbc28 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20241223144023-3abc09e42ca8 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

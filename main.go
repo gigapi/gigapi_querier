@@ -6,15 +6,17 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/gigapi/gigapi-config/config"
 	"github.com/gigapi/gigapi-querier/core"
 	"github.com/gigapi/gigapi-querier/querier"
 	"log"
 	"net/http"
 	"os"
-	"strconv"
 )
 
 func main() {
+	config.InitConfig("")
+
 	ctx := core.WithDefaultLogger(context.Background(), "main")
 	// Add command line flags
 	queryFlag := flag.String("query", "", "Execute a single query and exit")
@@ -22,23 +24,11 @@ func main() {
 	flag.Parse()
 
 	// Get configuration from environment variables
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
+	port := config.Config.Port
 
-	flightsqlPort := os.Getenv("FLIGHTSQL_PORT")
-	if flightsqlPort == "" {
-		flightsqlPort = "8082"
-	}
+	flightsqlPort := config.Config.FlightSqlPort
 
-	dataDir := os.Getenv("DATA_DIR")
-	if dataDir == "" {
-		dataDir = os.Getenv("GIGAPI_ROOT")
-		if dataDir == "" {
-			dataDir = "./data"
-		}
-	}
+	dataDir := querier.GetRootDir()
 
 	// Create QueryClient
 	client := querier.NewQueryClient(dataDir)
@@ -83,24 +73,17 @@ func main() {
 	mux.HandleFunc("/query", server.HandleQuery)
 
 	// Start main server
-	core.Infof(ctx, "GigAPI server running at http://localhost:%s", port)
+	core.Infof(ctx, "GigAPI server running at http://localhost:%d", port)
 	go func() {
-		err = http.ListenAndServe(":"+port, mux)
+		err = http.ListenAndServe(fmt.Sprintf(":%d", port), mux)
 		if err != nil {
 			core.Errorf(ctx, "Failed to start main server: %v", err)
 			os.Exit(1)
 		}
 	}()
 
-	// Start FlightSQL server
-	flightsqlPortInt, err := strconv.Atoi(flightsqlPort)
-	if err != nil {
-		core.Errorf(ctx, "Invalid FlightSQL port: %v", err)
-		os.Exit(1)
-	}
-
 	core.Infof(ctx, "FlightSQL server running on port %s", flightsqlPort)
-	err = querier.StartFlightSQLServer(flightsqlPortInt, client)
+	err = querier.StartFlightSQLServer(flightsqlPort, client)
 	if err != nil {
 		core.Errorf(ctx, "Failed to start FlightSQL server: %v", err)
 		os.Exit(1)
