@@ -2,25 +2,46 @@
 package querier
 
 import (
+	"archive/zip"
+	"bytes"
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"github.com/gigapi/gigapi-config/config"
 	"github.com/gigapi/gigapi-querier/core"
+	"github.com/spf13/afero"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"path"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 )
 
-//go:embed ui.html
-var uiContent []byte
+//go:embed ui.zip
+var ui []byte
 
 // Server represents the API server
 type Server struct {
 	QueryClient *QueryClient
 	DisableUI   bool
+	UIFS        afero.Fs
+}
+
+func GetRootDir() string {
+	dataDir := os.Getenv("DATA_DIR")
+	if dataDir != "" {
+		return dataDir
+	}
+	dataDir = config.Config.Gigapi.Root
+	if dataDir != "" {
+		return dataDir
+	}
+	return "./data"
 }
 
 // NewServer creates a new server instance
@@ -31,12 +52,66 @@ func NewServer(dataDir string) (*Server, error) {
 		return nil, err
 	}
 
-	disableUI := os.Getenv("DISABLE_UI") == "true"
+	disableUI := !config.Config.Gigapi.UI
+
+	memFS := afero.NewMemMapFs()
+
+	// Unzip UI files into memory
+	if err := unzipToMemFS(memFS, ui); err != nil {
+		return nil, fmt.Errorf("failed to unzip UI: %w", err)
+	}
 
 	return &Server{
 		QueryClient: client,
 		DisableUI:   disableUI,
+		UIFS:        memFS,
 	}, nil
+}
+
+func unzipFileToMemFS(memFS afero.Fs, zipFile *zip.File, absPath string) error {
+	rc, err := zipFile.Open()
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+
+	file, err := memFS.Create(absPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	_, err = io.Copy(file, rc)
+	return err
+}
+
+func unzipToMemFS(memFS afero.Fs, zipData []byte) error {
+	zipReader, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
+	if err != nil {
+		return err
+	}
+
+	for _, zipFile := range zipReader.File {
+		fpath := filepath.Clean("/" + zipFile.Name)
+
+		root := "/"
+		absPath := filepath.Join(root, fpath)
+		if !strings.HasPrefix(absPath, filepath.Clean(root)) {
+			log.Printf("Skipping file with invalid path: %s", zipFile.Name)
+			continue
+		}
+
+		if zipFile.FileInfo().IsDir() {
+			memFS.MkdirAll(absPath, zipFile.Mode())
+			continue
+		}
+		err = unzipFileToMemFS(memFS, zipFile, absPath)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // QueryRequest represents a query API request
@@ -178,29 +253,41 @@ func (s *Server) HandleHealth(w http.ResponseWriter, r *http.Request) {
 
 // HandleUI serves the main UI page
 func (s *Server) HandleUI(w http.ResponseWriter, r *http.Request) {
-	// If UI is disabled, return 404
 	if s.DisableUI {
 		http.NotFound(w, r)
 		return
 	}
-
-	// Add CORS headers
 	addCORSHeaders(w)
-
-	// Only allow GET requests
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Set proper headers
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(uiContent)))
+	// Serve static files from dist
+	distFS := afero.NewBasePathFs(s.UIFS, "/dist")
+	httpFS := afero.NewHttpFs(distFS)
+	fileServer := http.FileServer(httpFS)
 
-	// Write the embedded UI content
-	if _, err := w.Write(uiContent); err != nil {
-		log.Printf("Error writing response: %v", err)
+	// Try to serve the requested file
+	requestedPath := r.URL.Path
+	if requestedPath == "/" || requestedPath == "" {
+		content, err := distFS.Open("index.html")
+		if err != nil {
+			log.Printf("Error reading index.html: %v", err)
+			http.Error(w, "Internal server error", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(200)
+		io.Copy(w, content)
+		return
 	}
+	// Check if file exists in embedded FS
+	_, err := distFS.Stat(path.Clean(requestedPath))
+	if err != nil {
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+	fileServer.ServeHTTP(w, r)
 }
 
 // Close the server and release resources
