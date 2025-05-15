@@ -4,7 +4,7 @@ go 1.24.2
 
 require (
 	github.com/apache/arrow/go/v14 v14.0.2
-	github.com/gigapi/gigapi-config v0.0.4
+	github.com/gigapi/gigapi-config v0.0.6
 	github.com/gigapi/gigapi/v2 v2.0.13
 	github.com/marcboeker/go-duckdb/v2 v2.2.0
 	github.com/spf13/afero v1.12.0

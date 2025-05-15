@@ -52,7 +52,7 @@ func NewServer(dataDir string) (*Server, error) {
 		return nil, err
 	}
 
-	disableUI := config.Config.DisableUI
+	disableUI := !config.Config.Gigapi.UI
 
 	memFS := afero.NewMemMapFs()
 

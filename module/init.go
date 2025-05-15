@@ -20,7 +20,7 @@ func WithNoError(hndl func(w http.ResponseWriter, r *http.Request),
 }
 
 func Init(api modules.Api) {
-	if config.Config.Mode != "readonly" && config.Config.Mode != "aio" {
+	if config.Config.Gigapi.Mode != "readonly" && config.Config.Gigapi.Mode != "aio" {
 		return
 	}
 	var err error
