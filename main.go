@@ -24,9 +24,9 @@ func main() {
 	flag.Parse()
 
 	// Get configuration from environment variables
-	port := config.Config.Port
+	port := config.Config.HTTP.Port
 
-	flightsqlPort := config.Config.FlightSqlPort
+	flightsqlPort := config.Config.FlightSql.Port
 
 	dataDir := querier.GetRootDir()
 
