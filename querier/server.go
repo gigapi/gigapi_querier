@@ -16,7 +16,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -157,6 +156,17 @@ func (s *Server) HandleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	format := r.URL.Query().Get("format")
+	if format == "" {
+		format = "json"
+	}
+
+	formatter, ok := formatters[format]
+	if !ok {
+		sendErrorResponse(w, fmt.Sprintf("Unsupported format: %s", format), http.StatusBadRequest)
+		return
+	}
+
 	// Parse request body
 	var req QueryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -185,43 +195,11 @@ func (s *Server) HandleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Process results to Handle special types for JSON
-	processedResults := ProcessResultsForJSON(results)
-
-	// Send response
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(QueryResponse{
-		Results: processedResults,
-	})
-}
-
-// ProcessResultsForJSON prepares results for JSON serialization
-func ProcessResultsForJSON(results []map[string]interface{}) []map[string]interface{} {
-	processedResults := make([]map[string]interface{}, len(results))
-
-	for i, row := range results {
-		processedRow := make(map[string]interface{})
-
-		for key, value := range row {
-			// Handle different types of values
-			switch v := value.(type) {
-			case nil:
-				processedRow[key] = nil
-			case int64:
-				// Convert int64 to string for JSON
-				processedRow[key] = strconv.FormatInt(v, 10)
-			case time.Time:
-				// Format time values
-				processedRow[key] = v.Format(time.RFC3339Nano)
-			default:
-				processedRow[key] = v
-			}
-		}
-
-		processedResults[i] = processedRow
+	err = formatter(results, w)
+	if err != nil {
+		log.Printf("Error formatting results: %v", err)
+		return
 	}
-
-	return processedResults
 }
 
 // Send an error response in JSON format
