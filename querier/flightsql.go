@@ -19,10 +19,10 @@ import (
 	"github.com/apache/arrow/go/v14/arrow/ipc"
 	"github.com/apache/arrow/go/v14/arrow/memory"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/grpc/metadata"
 )
 
 // FlightSQLServer implements the FlightSQL server interface
@@ -469,10 +469,18 @@ func inferTypeFromColumn(columnName string, results []map[string]interface{}) ar
 	return arrow.BinaryTypes.String
 }
 
+var s *grpc.Server
+
+func StopFlightSQLServer() {
+	if s != nil {
+		s.Stop()
+	}
+}
+
 // StartFlightSQLServer starts the FlightSQL server
 func StartFlightSQLServer(port int, queryClient *QueryClient) error {
 	server := NewFlightSQLServer(queryClient)
-	s := grpc.NewServer()
+	s = grpc.NewServer()
 	flightgen.RegisterFlightServiceServer(s, server)
 	reflection.Register(s)
 
