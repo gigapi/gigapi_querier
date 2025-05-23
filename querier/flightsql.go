@@ -34,6 +34,13 @@ type FlightSQLServer struct {
 	// Add result storage
 	results     map[string]arrow.Record
 	resultsLock sync.RWMutex
+
+	// Add meta result storage for GetTables/GetSqlInfo
+	metaResults map[string]struct {
+		cmdType string
+		params []byte // store the raw command bytes for later use
+	}
+	metaResultsLock sync.RWMutex
 }
 
 // mustEmbedUnimplementedFlightServiceServer implements the FlightServiceServer interface
@@ -45,6 +52,10 @@ func NewFlightSQLServer(queryClient *QueryClient) *FlightSQLServer {
 		queryClient: queryClient,
 		mem:         memory.DefaultAllocator,
 		results:     make(map[string]arrow.Record),
+		metaResults: make(map[string]struct {
+			cmdType string
+			params []byte
+		}),
 	}
 }
 
@@ -104,17 +115,15 @@ func (s *FlightSQLServer) GetFlightInfo(ctx context.Context, desc *flight.Flight
 	log.Printf("GetFlightInfo called with descriptor type: %v, path: %v, cmd: %v",
 		desc.Type, desc.Path, string(desc.Cmd))
 
-	// Handle SQL query command
 	if desc.Type == flight.DescriptorCMD {
-		// Unmarshal the Any message
 		any := &anypb.Any{}
 		if err := proto.Unmarshal(desc.Cmd, any); err != nil {
 			log.Printf("Failed to unmarshal Any message: %v", err)
 			return nil, fmt.Errorf("failed to unmarshal command: %w", err)
 		}
 
-		// Check if this is a CommandStatementQuery
-		if any.TypeUrl == "type.googleapis.com/arrow.flight.protocol.sql.CommandStatementQuery" {
+		switch any.TypeUrl {
+		case "type.googleapis.com/arrow.flight.protocol.sql.CommandStatementQuery":
 			// The query is in the Any message's value
 			query := string(any.Value)
 			// Clean up the query string
@@ -193,6 +202,48 @@ func (s *FlightSQLServer) GetFlightInfo(ctx context.Context, desc *flight.Flight
 
 			log.Printf("Returning flight info with %d records", recordBatch.NumRows())
 			return info, nil
+		case "type.googleapis.com/arrow.flight.protocol.sql.CommandGetTables":
+			// Generate a unique ticket
+			ticketID := fmt.Sprintf("get-tables-%d", time.Now().UnixNano())
+			s.metaResultsLock.Lock()
+			s.metaResults[ticketID] = struct {
+				cmdType string
+				params []byte
+			}{cmdType: "getTables", params: any.Value}
+			s.metaResultsLock.Unlock()
+			ticket := &flight.Ticket{Ticket: []byte(ticketID)}
+			info := &flight.FlightInfo{
+				FlightDescriptor: desc,
+				Endpoint: []*flight.FlightEndpoint{{
+					Ticket: ticket,
+					Location: []*flight.Location{{Uri: "grpc://localhost:8082"}},
+				}},
+				TotalRecords: -1,
+				TotalBytes:   -1,
+				Schema:       []byte{},
+			}
+			return info, nil
+		case "type.googleapis.com/arrow.flight.protocol.sql.CommandGetSqlInfo":
+			// Generate a unique ticket
+			ticketID := fmt.Sprintf("get-sqlinfo-%d", time.Now().UnixNano())
+			s.metaResultsLock.Lock()
+			s.metaResults[ticketID] = struct {
+				cmdType string
+				params []byte
+			}{cmdType: "getSqlInfo", params: any.Value}
+			s.metaResultsLock.Unlock()
+			ticket := &flight.Ticket{Ticket: []byte(ticketID)}
+			info := &flight.FlightInfo{
+				FlightDescriptor: desc,
+				Endpoint: []*flight.FlightEndpoint{{
+					Ticket: ticket,
+					Location: []*flight.Location{{Uri: "grpc://localhost:8082"}},
+				}},
+				TotalRecords: -1,
+				TotalBytes:   -1,
+				Schema:       []byte{},
+			}
+			return info, nil
 		}
 	}
 
@@ -252,6 +303,64 @@ func (s *FlightSQLServer) GetFlightInfoStatement(ctx context.Context, cmd *fligh
 // DoGet implements the FlightSQL server interface for retrieving data
 func (s *FlightSQLServer) DoGet(ticket *flight.Ticket, stream flight.FlightService_DoGetServer) error {
 	log.Printf("DoGet called with ticket: %v", string(ticket.Ticket))
+
+	// Check if this is a meta result (GetTables/GetSqlInfo)
+	s.metaResultsLock.RLock()
+	meta, isMeta := s.metaResults[string(ticket.Ticket)]
+	s.metaResultsLock.RUnlock()
+	if isMeta {
+		switch meta.cmdType {
+		case "getTables":
+			// For now, return a single table row with minimal fields
+			schema := arrow.NewSchema([]arrow.Field{
+				{Name: "catalog_name", Type: arrow.BinaryTypes.String, Nullable: true},
+				{Name: "db_schema_name", Type: arrow.BinaryTypes.String, Nullable: true},
+				{Name: "table_name", Type: arrow.BinaryTypes.String, Nullable: false},
+				{Name: "table_type", Type: arrow.BinaryTypes.String, Nullable: false},
+			}, nil)
+			b0 := array.NewStringBuilder(memory.DefaultAllocator)
+			b1 := array.NewStringBuilder(memory.DefaultAllocator)
+			b2 := array.NewStringBuilder(memory.DefaultAllocator)
+			b3 := array.NewStringBuilder(memory.DefaultAllocator)
+			// Example: one table
+			b0.Append("") // catalog_name
+			b1.Append("") // db_schema_name
+			b2.Append("table") // table_name
+			b3.Append("BASE TABLE") // table_type
+			record := array.NewRecord(schema, []arrow.Array{b0.NewArray(), b1.NewArray(), b2.NewArray(), b3.NewArray()}, 1)
+			defer record.Release()
+			writer := flight.NewRecordWriter(stream, ipc.WithSchema(schema))
+			err := writer.Write(record)
+			if err != nil {
+				return fmt.Errorf("failed to write getTables record: %w", err)
+			}
+			s.metaResultsLock.Lock()
+			delete(s.metaResults, string(ticket.Ticket))
+			s.metaResultsLock.Unlock()
+			return writer.Close()
+		case "getSqlInfo":
+			// For now, return a single info value (e.g., server name)
+			schema := arrow.NewSchema([]arrow.Field{
+				{Name: "info_name", Type: arrow.PrimitiveTypes.Uint32, Nullable: false},
+				{Name: "value", Type: arrow.BinaryTypes.String, Nullable: true},
+			}, nil)
+			b0 := array.NewUint32Builder(memory.DefaultAllocator)
+			b1 := array.NewStringBuilder(memory.DefaultAllocator)
+			b0.Append(1) // e.g., SQL_SERVER_NAME
+			b1.Append("Gigapi-Querier")
+			record := array.NewRecord(schema, []arrow.Array{b0.NewArray(), b1.NewArray()}, 1)
+			defer record.Release()
+			writer := flight.NewRecordWriter(stream, ipc.WithSchema(schema))
+			err := writer.Write(record)
+			if err != nil {
+				return fmt.Errorf("failed to write getSqlInfo record: %w", err)
+			}
+			s.metaResultsLock.Lock()
+			delete(s.metaResults, string(ticket.Ticket))
+			s.metaResultsLock.Unlock()
+			return writer.Close()
+		}
+	}
 
 	// Get the results from storage
 	s.resultsLock.RLock()
