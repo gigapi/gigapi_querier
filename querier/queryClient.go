@@ -700,6 +700,22 @@ func (c *QueryClient) Query(ctx context.Context, query, dbName string) ([]map[st
 			}
 		}
 		return results, nil
+
+	// Special InfluxDB IOx compatibility: information_schema.tables
+	case "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES":
+		// Return SHOW TABLES for the given dbName, but format as []map[string]interface{}{"table_name": ...}
+		tables, err := c.Query(ctx, "SHOW TABLES", dbName)
+		if err != nil {
+			return nil, err
+		}
+		// Only return the "table_name" field, as expected by the client
+		var result []map[string]interface{}
+		for _, t := range tables {
+			if name, ok := t["table_name"]; ok {
+				result = append(result, map[string]interface{}{"table_name": name})
+			}
+		}
+		return result, nil
 	}
 
 	// Parse the query
