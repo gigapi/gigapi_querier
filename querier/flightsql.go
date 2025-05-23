@@ -314,7 +314,7 @@ func (s *FlightSQLServer) DoGet(ticket *flight.Ticket, stream flight.FlightServi
 			// Enumerate real tables (directories) in the default database
 			dbName := "default"
 			// Use QueryClient logic to list tables
-			entries, err := s.queryClient.Query(ctx, "SHOW TABLES", dbName)
+			entries, err := s.queryClient.Query(context.Background(), "SHOW TABLES", dbName)
 			if err != nil {
 				return fmt.Errorf("failed to enumerate tables: %w", err)
 			}
