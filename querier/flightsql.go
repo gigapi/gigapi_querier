@@ -309,6 +309,10 @@ func (s *FlightSQLServer) DoGet(ticket *flight.Ticket, stream flight.FlightServi
 	meta, isMeta := s.metaResults[string(ticket.Ticket)]
 	s.metaResultsLock.RUnlock()
 	if isMeta {
+		// Print incoming metadata for debugging
+		if md, ok := metadata.FromIncomingContext(stream.Context()); ok {
+			log.Printf("DoGet metadata: %v", md)
+		}
 		switch meta.cmdType {
 		case "getTables":
 			// Enumerate real tables (directories) in the default database
