@@ -311,7 +311,13 @@ func (s *FlightSQLServer) DoGet(ticket *flight.Ticket, stream flight.FlightServi
 	if isMeta {
 		switch meta.cmdType {
 		case "getTables":
-			// For now, return a single table row with minimal fields
+			// Enumerate real tables (directories) in the default database
+			dbName := "default"
+			// Use QueryClient logic to list tables
+			entries, err := s.queryClient.Query(ctx, "SHOW TABLES", dbName)
+			if err != nil {
+				return fmt.Errorf("failed to enumerate tables: %w", err)
+			}
 			schema := arrow.NewSchema([]arrow.Field{
 				{Name: "catalog_name", Type: arrow.BinaryTypes.String, Nullable: true},
 				{Name: "db_schema_name", Type: arrow.BinaryTypes.String, Nullable: true},
@@ -322,15 +328,17 @@ func (s *FlightSQLServer) DoGet(ticket *flight.Ticket, stream flight.FlightServi
 			b1 := array.NewStringBuilder(memory.DefaultAllocator)
 			b2 := array.NewStringBuilder(memory.DefaultAllocator)
 			b3 := array.NewStringBuilder(memory.DefaultAllocator)
-			// Example: one table
-			b0.Append("") // catalog_name
-			b1.Append("") // db_schema_name
-			b2.Append("table") // table_name
-			b3.Append("BASE TABLE") // table_type
-			record := array.NewRecord(schema, []arrow.Array{b0.NewArray(), b1.NewArray(), b2.NewArray(), b3.NewArray()}, 1)
+			for _, row := range entries {
+				tableName, _ := row["table_name"].(string)
+				b0.Append("") // catalog_name
+				b1.Append("") // db_schema_name
+				b2.Append(tableName)
+				b3.Append("BASE TABLE")
+			}
+			record := array.NewRecord(schema, []arrow.Array{b0.NewArray(), b1.NewArray(), b2.NewArray(), b3.NewArray()}, int64(len(entries)))
 			defer record.Release()
 			writer := flight.NewRecordWriter(stream, ipc.WithSchema(schema))
-			err := writer.Write(record)
+			err = writer.Write(record)
 			if err != nil {
 				return fmt.Errorf("failed to write getTables record: %w", err)
 			}
